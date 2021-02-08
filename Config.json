@@ -1,0 +1,6 @@
+{
+  "map_file": "Network_map/edgeList.csv",
+  "passenger_file": "../../Datasets/2016_Yellow_Taxi_Data/training_morning_1.csv",
+  "HV_fleet_size": 10,
+  "AV_fleet_size": 5
+}
