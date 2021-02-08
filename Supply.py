@@ -53,15 +53,15 @@ class Vehicle:
             deltaD = deltaT * self.loc.length / self.loc.travelTime
             self.loc.timeFromTarget -= deltaT
             self.loc.timeFromSource += deltaT
-            self.loc.locFromTarget -= round(deltaD, 2)
-            self.loc.locFromSource += round(deltaD, 2)
+            self.loc.locFromTarget -= deltaD
+            self.loc.locFromSource += deltaD
         else:
             self.pathNodes = self.pathNodes[idx-1::]
             self.pathTimes = self.pathTimes[idx-1::]
             source = self.pathNodes[0]
             target = self.pathNodes[1]
             pos = (t - self.pathTimes[0]) * G.edges[source, target]['length'] / G.edges[source, target]['travel_time']
-            self.loc = Location(source, target, round(pos, 2))
+            self.loc = Location(source, target, pos, 2)
         self.time = t
 
 
@@ -101,3 +101,10 @@ class AV(Vehicle):
     def deactivate(self):
         # Go to nearest parking facility for charging and maintenance
         pass
+
+
+class VehicleEvent:
+    priority = 1
+
+    def __lt__(self, other):
+        return self.priority < other.priority

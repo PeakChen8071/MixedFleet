@@ -1,6 +1,8 @@
 import numpy as np
+import networkx as nx
+import utm
 
-from Map import nx, utm, G
+from Map import G
 
 Events = []
 
@@ -8,7 +10,7 @@ Events = []
 def random_loc():
     rng = np.random.default_rng()
     random_edge = rng.choice(G.edges)
-    random_dist = round(np.random.uniform(0, G.edges[random_edge]['length']), 2)
+    random_dist = np.random.uniform(0, G.edges[random_edge]['length'])
     return Location(random_edge[0], random_edge[1], random_dist)
 
 
@@ -32,14 +34,13 @@ def lonlat_to_loc(lon, lat):
         unit_vector = vector / np.linalg.norm(vector)
         projected_dist = np.dot(point, unit_vector)
         if (projected_dist < 0) | (projected_dist > np.linalg.norm(vector)):
-            del projected_dist
-            continue  # Passenger must be within the line segment (i.e. edge)
+            continue  # Passenger must be within the line segment/edge
         perpendicular_dist = np.linalg.norm(point - projected_dist / np.linalg.norm(vector) * unit_vector)
         if perpendicular_dist <= nearest_dist:
             nearest_dist = perpendicular_dist
             source = u
             target = v
-            loc_from_source = round(projected_dist / np.linalg.norm(vector) * G.edges[u, v]['length'], 2)
+            loc_from_source = projected_dist / np.linalg.norm(vector) * G.edges[u, v]['length']
 
     return Location(source, target, loc_from_source)
 
@@ -71,42 +72,32 @@ def duration_between(from_loc, to_loc, weight='travel_time'):
 
 
 class Location:
-    def __init__(self, source, target=None, loc_from_source=0):
-        if (target is not None) & (loc_from_source != 0):
-            if loc_from_source != G.edges[source, target]['length']:
+    def __init__(self, source, target=None, loc_from_source=None):
+        self.type = 'Intersection'
+        self.source = source
+        self.target = None
+        self.locFromSource = None
+        self.timeFromSource = None
+        self.locFromTarget = None
+        self.timeFromTarget = None
+        if (target is not None) and (loc_from_source is not None):
+            if loc_from_source == G.edges[source, target]['length']:
+                self.source = target
+            elif loc_from_source != 0:
                 self.type = 'Road'
-                self.source = source
                 self.target = target
                 self.length = G.edges[source, target]['length']
                 self.travelTime = G.edges[source, target]['travel_time']
-                if (loc_from_source > 0) & (loc_from_source < self.length):
-                    self.locFromSource = loc_from_source
-                    self.timeFromSource = int(self.travelTime * self.locFromSource / self.length)
-                    self.locFromTarget = self.length - self.locFromSource
-                    self.timeFromTarget = self.travelTime - self.timeFromSource
-                else:
-                    raise ValueError('Value of loc_from_source is invalid.')
-            else:
-                self.type = 'Intersection'
-                self.source = target
-                self.target = target
-                self.locFromSource = None
-                self.locFromTarget = None
-        else:
-            self.type = 'Intersection'
-            self.source = source
-            self.target = source
-            self.locFromSource = None
-            self.locFromTarget = None
+                self.locFromSource = loc_from_source
+                self.timeFromSource = int(self.travelTime * self.locFromSource / self.length)
+                self.locFromTarget = self.length - self.locFromSource
+                self.timeFromTarget = self.travelTime - self.timeFromSource
 
     def __repr__(self):
         if self.type is 'Intersection':
             return 'nodes[{}]'.format(self.source)
         else:
-            return 'edges{}_{}m'.format([self.source, self.target], self.locFromSource)
+            return 'edges{}_{}m'.format([self.source, self.target], round(self.locFromSource, 2))
 
     def is_intersection(self):
-        if self.type is 'Intersection':
-            return True
-        else:
-            return False
+        return self.type is 'Intersection'

@@ -13,16 +13,15 @@ deploy_AV()
 load_passengers()  # Load passengers into Events
 
 t = 0
-while t < simulationEndTime+1:
+while (t < simulationEndTime + 1) and (len(Events) != 0):
     event = heapq.heappop(Events)
     eventType = event[1]
     t = event[0]
 
     if eventType == 0:
-        # update_phi()
-        continue
+        update_phi()
     elif eventType == 1:
-        Passenger(event[0], event[3], event[4], event[5], event[6])
+        Passenger(t, event[3], event[4], event[5], event[6], HV.HV_v.values(), AV.AV_v.values())
     # elif eventType == 2:
     #     vehicle_id = event[2]
     #     if vehicle_id in HV.HV_v.keys():
