@@ -1,6 +1,5 @@
 import pandas as pd
 import networkx as nx
-import utm
 import matplotlib.pyplot as plt
 
 from Configuration import configs
@@ -8,18 +7,14 @@ from Configuration import configs
 
 def build_map():
     edge_list_df = pd.read_csv(configs['map_file'])
+    edge_list_df.set_index('to_node', drop=False, inplace=True)
+    edge_list_df['pos'] = tuple(zip(edge_list_df['to_node_lon'], edge_list_df['to_node_lat']))
+
+    # Construct Networkx directed graph based on edge list
     graph = nx.convert_matrix.from_pandas_edgelist(edge_list_df, 'from_node', 'to_node',
                                                    edge_attr=['length', 'travel_time'],
                                                    create_using=nx.DiGraph)
-    headers = edge_list_df.columns.to_list()
-    for n in graph.nodes():
-        if n in edge_list_df['from_node'].values:
-            graph.nodes[n]['pos'] = tuple(edge_list_df[edge_list_df['from_node'] == n].iloc[0, [
-                headers.index('from_node_lon'), headers.index('from_node_lat')]])
-        elif n in edge_list_df['to_node'].values:
-            graph.nodes[n]['pos'] = tuple(edge_list_df[edge_list_df['to_node'] == n].iloc[0, [
-                headers.index('to_node_lon'), headers.index('to_node_lat')]])
-        graph.nodes[n]['xy'] = utm.from_latlon(graph.nodes[n]['pos'][1], graph.nodes[n]['pos'][0])[:2]
+    nx.set_node_attributes(graph, edge_list_df['pos'].to_dict(), 'pos')  # Inject node data
     return graph
 
 

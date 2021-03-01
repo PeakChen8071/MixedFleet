@@ -1,88 +1,82 @@
-import math
+import networkx as nx
 
-from Basics import *
+from Basics import Event, duration_between, distance_between
+from Control import assignment_data
 from Demand import Passenger
-from Supply import HV, AV
-from Control import Variables
-
-
-def update_time(t):
-    for pHV in Passenger.p_w_HV.values():
-        pHV.update(t)
-    for pAV in Passenger.p_w_AV.values():
-        pAV.update(t)
-
-    for hv in HV.HV_v.values():
-        hv.update(t)
-    for av in AV.AV_v.values():
-        av.update(t)
-
-
-# Exponential regression function which approximates the ratio of Actual matched distance to Nearest vehicle distance
-def update_phi():
-    x1 = min(len(HV.HV_v), len(Passenger.p_w_HV))
-    y1 = max(len(HV.HV_v), len(Passenger.p_w_HV))
-    x2 = min(len(AV.AV_v), len(Passenger.p_w_AV))
-    y2 = max(len(AV.AV_v), len(Passenger.p_w_AV))
-    Variables.phiHV = math.exp(0.16979338 + 0.03466977 * x1 - 0.0140257 * y1)
-    Variables.phiAV = math.exp(0.16979338 + 0.03466977 * x2 - 0.0140257 * y2)
+from Supply import HVs, AVs, CruiseTrip
 
 
 # Bipartite matching which minimises the total dispatch trip duration
 def bipartite_match(vacant_v, waiting_p):
     if (not vacant_v) | (not waiting_p):
         return None  # No matching if either set is empty
+
     bipartite_edges = []
-    for p in waiting_p.values():
-        for v in vacant_v.values():
-            bipartite_edges.append((v, p, {'trip_distance': distance_between(v.loc, p.origin)}))
-            # bipartite_edges.append((v, p, {'trip_duration': duration_between(v.loc, p.origin)}))
+    for p in waiting_p:
+        for v in vacant_v:
+            bipartite_edges.append((v, p, {'duration': duration_between(v.loc, p.origin)}))
     bipartite_graph = nx.Graph()
-    bipartite_graph.add_nodes_from(vacant_v.values(), bipartite=0)
-    bipartite_graph.add_nodes_from(waiting_p.values(), bipartite=1)
+    bipartite_graph.add_nodes_from(vacant_v, bipartite=0)
+    bipartite_graph.add_nodes_from(waiting_p, bipartite=1)
     bipartite_graph.add_edges_from(bipartite_edges)
-    return nx.bipartite.minimum_weight_full_matching(bipartite_graph, weight='trip_distance')
+
+    results = []
+    for v, p in nx.bipartite.minimum_weight_full_matching(bipartite_graph, weight='duration').items():
+        if isinstance(p, Passenger):
+            results.append((v, p, bipartite_graph.edges[v, p]['duration']))
+
+    return results
 
 
 def compute_assignment(t):
-    update_time(t)
-    HV_match = bipartite_match(HV.HV_v, Passenger.p_w_HV)
-    AV_match = bipartite_match(AV.AV_v, Passenger.p_w_AV)
+    for v in (HVs | AVs).values():
+        v.update_loc(t)  # Update vehicle locations
+
+    for p in (Passenger.p_HV | Passenger.p_AV).values():
+        p.check_expiration(t)  # Remove expired passengers
+
+    HV_match = bipartite_match(HVs.values(), Passenger.p_HV.values())
+    AV_match = bipartite_match(AVs.values(), Passenger.p_AV.values())
     return HV_match, AV_match
 
 
-class Trip:
-    def __init__(self, vehicle):
-        self.vehicle = vehicle
-        self.beginTime = vehicle.time
-        if self.vehicle.state == 'assigned':
-            self.purpose = 'dispatch'
-            self.destination = vehicle.withPassenger.origin
-        elif self.vehicle.state == 'occupied':
-            self.purpose = 'delivery'
-            self.destination = vehicle.withPassenger.destination
-        else:
-            raise ValueError('Vehicle must be assigned or occupied.')
+class Assign(Event):
+    def __init__(self, time):
+        super().__init__(time, priority=3)
 
-        self.passenger = None
-        self.fare = None
-        self.path = None
-        self.distance = None
-        self.duration = None
-        self.arrivalTime = None
+    def __lt__(self, other):
+        return (self.time, self.priority) < (other.time, other.priority)
 
-        if self.purpose == 'dispatch':
-            self.path = path_between(vehicle.loc, vehicle.withPassenger.origin)
-            self.distance = distance_between(vehicle.loc, self.destination)
-            self.duration = duration_between(vehicle.loc, self.destination)
-            self.arrivalTime = self.beginTime + self.duration
-        elif self.purpose == 'delivery':
-            self.path = path_between(vehicle.withPassenger.origin, vehicle.withPassenger.destination)
-            self.distance = distance_between(vehicle.withPassenger.origin, vehicle.withPassenger.destination)
-            self.duration = duration_between(vehicle.withPassenger.origin, vehicle.withPassenger.destination)
-            self.arrivalTime = self.beginTime + self.duration
-        else:
-            raise ValueError('Incorrect destination for trip purpose: {}'.format(self.purpose))
+    def __repr__(self):
+        return 'Assignment@t{}'.format(self.time)
 
+    def match(self, match_results):
+        if match_results is not None:
+            for m in match_results:
+                v = m[0]
+                p = m[1]
+                dispatch_t = self.time + m[2]
+                delivery_t = dispatch_t + p.tripDuration
 
+                if v.is_HV:
+                    del HVs[v.id]
+                    del Passenger.p_HV[p.id]
+                else:
+                    del AVs[v.id]
+                    del Passenger.p_AV[p.id]
 
+                v.nextCruise = CruiseTrip(delivery_t, v, drop_off=True)
+
+                # Assignment results output
+                trip_id = next(self._ids)
+                assignment_data['v_id'].update({trip_id: v.id})
+                assignment_data['p_id'].update({trip_id: p.id})
+                assignment_data['assignment_t'].update({trip_id: self.time})
+                assignment_data['dispatch_t'].update({trip_id: dispatch_t})
+                assignment_data['delivery_t'].update({trip_id: delivery_t})
+                assignment_data['dispatch_d'].update({trip_id: distance_between(v.loc, p.origin)})
+
+    def trigger(self):
+        HV_match, AV_match = compute_assignment(self.time)
+        self.match(HV_match)
+        self.match(AV_match)

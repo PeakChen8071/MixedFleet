@@ -1,86 +1,122 @@
-import heapq
 from itertools import count
+from scipy.stats import truncnorm
 import numpy as np
 
-from Control import Variables
-from Basics import Events, Location, distance_between
 from Parser import read_passengers
+from Basics import Event, Location, duration_between
+from Control import Variables, compute_phi, passenger_data
 
-passenger_df = read_passengers()
-simulationEndTime = passenger_df['time'].max()
 
+def load_passengers(fraction=1, rows=None):
+    passenger_df = read_passengers(fraction, rows)
 
-def load_passengers():
+    # Update values of phi before creating new passengers
+    for t in passenger_df['time'].unique():
+        UpdatePhi(t)
+
+    # Create passenger events
     for idx, p in passenger_df.iterrows():
-        heapq.heappush(Events, (int(p['time']), 1, idx,
-                                Location(p['origin_loc_source'],
-                                         p['origin_loc_target'],
-                                         p['origin_loc_distance']),
-                                Location(p['destination_loc_source'],
-                                         p['destination_loc_target'],
-                                         p['destination_loc_distance']),
-                                p['trip_distance'], p['trip_duration']))
+        NewPassenger(int(p['time']),
+                     Location(p['origin_loc_source'],
+                              p['origin_loc_target'],
+                              p['origin_loc_distance']),
+                     Location(p['destination_loc_source'],
+                              p['destination_loc_target'],
+                              p['destination_loc_distance']),
+                     p['trip_distance'], int(p['trip_duration']))
 
-    for i in passenger_df['time'].unique():  # Update phi before creating passengers for car choice
-        heapq.heappush(Events, (int(i), 0))
+    return passenger_df['time'].max()
 
 
 class Passenger:
     _ids = count(0)
-    p_w_HV = {}
-    p_w_AV = {}
-    cancelled = count(0)
+    p_HV = {}
+    p_AV = {}
 
-    def __init__(self, time, origin, destination, trip_distance, trip_duration, HV_v=None, AV_v=None, patience=60):
+    def __init__(self, time, origin, destination, trip_distance, trip_duration, HVs=None, AVs=None):
         self.id = next(self._ids)
-        self.expiredTime = time + int(np.random.normal(patience, patience / 10))
+        self.startTime = time
+        self.expiredTime = time + int(truncnorm.rvs(a=-10, b=10, loc=60, scale=6))  # TODO: patience
+        self.VoT = int(truncnorm.rvs(a=-10, b=10, loc=50/3600, scale=5/3600))  # TODO: value of time
         self.origin = origin
         self.destination = destination
         self.tripDistance = trip_distance
         self.tripDuration = trip_duration
-        self.preferredCar, self.fare = Passenger.choose_vehicle(self, HV_v, AV_v)
-        if self.preferredCar is 'HV':
-            Passenger.p_w_HV[self.id] = self
-        elif self.preferredCar is 'AV':
-            Passenger.p_w_AV[self.id] = self
+        self.preferHV, self.fare = Passenger.choose_vehicle(self, HVs, AVs)
+        if self.preferHV:
+            Passenger.p_HV[self.id] = self
         else:
-            raise ValueError('Preferred vehicle type is unavailable.')
+            Passenger.p_AV[self.id] = self
+
+        self.record_output()
 
     def __repr__(self):
         return 'Passenger_{}'.format(self.id)
 
-    def update(self, time):
-        if time >= self.expiredTime:
-            Passenger.cancelled = next(Passenger.cancelled)
-            if self.preferredCar is 'HV':
-                Passenger.p_w_HV.pop(self.id)
-            elif self.preferredCar is 'AV':
-                Passenger.p_w_AV.pop(self.id)
-            else:
-                raise KeyError('Passenger_{} is not in the waiting dictionary.'.format(self.id))
-            del self
-
-    def nearest_vehicle(self, vehicles):
-        nearest_dist = float('inf')
-        for vehicle in vehicles:
-            nearest_dist = min(distance_between(vehicle.loc, self.origin), nearest_dist)
-        return nearest_dist
+    def min_wait_time(self, vehicles):
+        durations = [duration_between(vehicle.loc, self.origin) for vehicle in vehicles]
+        # TODO: When instantaneous demand > supply, provide approximate time to the 'nearest' vehicle
+        durations.append(1200)  # Default nearest time from vehicles at 20 min, when there are no vacant vehicles
+        return min(durations)
 
     def choose_vehicle(self, HV_v, AV_v):
-        valueOfTime = 50/3600  # assuming $50 per hour rate
+        # Fare = Flag price + Unit price * Trip distance
         fare_HV = Variables.HVf1 + Variables.HVf2 * self.tripDistance
         fare_AV = Variables.AVf1 + Variables.AVf2 * self.tripDistance
-        GC_HV = fare_HV + valueOfTime * Variables.phiHV * self.nearest_vehicle(HV_v)
-        GC_AV = fare_AV + valueOfTime * Variables.phiAV * self.nearest_vehicle(AV_v)
 
-        if np.random.rand() <= np.exp(GC_HV) / (np.exp(GC_HV) + np.exp(GC_AV)):
-            return 'HV', fare_HV
+        # Generalised cost = Fare + VoT * distanceRatio * TimeToNearestVehicle
+        GC_HV = fare_HV + self.VoT * Variables.phiHV * self.min_wait_time(HV_v)
+        GC_AV = fare_AV + self.VoT * Variables.phiAV * self.min_wait_time(AV_v)
+
+        # Logit choice based on GC (dis-utility) of vehicles
+        if np.random.rand() <= np.exp(-GC_HV) / (np.exp(-GC_HV) + np.exp(-GC_AV)):
+            return True, fare_HV
         else:
-            return 'AV', fare_AV
+            return False, fare_AV
+
+    def check_expiration(self, t):
+        if t >= self.expiredTime:
+            passenger_data['expired'][self.id] = True
+
+            if self.preferHV:
+                del Passenger.p_HV[self.id]
+            else:
+                del Passenger.p_AV[self.id]
+
+    def record_output(self):
+        passenger_data['start_t'].update({self.id: self.startTime})
+        passenger_data['expire_t'].update({self.id: self.expiredTime})
+        passenger_data['trip_d'].update({self.id: self.tripDistance})
+        passenger_data['fare'].update({self.id: self.fare})
+        passenger_data['prefer_HV'].update({self.id: self.preferHV})
+        passenger_data['expired'].update({self.id: False})
 
 
-class PassengerEvent:
-    priority = 1
+class UpdatePhi(Event):
+    def __init__(self, time):
+        super().__init__(time, priority=1)
 
     def __lt__(self, other):
-        return self.priority < other.priority
+        return (self.time, self.priority) < (other.time, other.priority)
+
+    def __repr__(self):
+        return 'UpdatePhi@t{}'.format(self.time)
+
+    def trigger(self, nHV, nAV):
+        Variables.phiHV = compute_phi(len(Passenger.p_HV), nHV)
+        Variables.phiAV = compute_phi(len(Passenger.p_AV), nAV)
+
+
+class NewPassenger(Event):
+    def __init__(self, time, *args):
+        super().__init__(time, priority=2)
+        self.args = args
+
+    def __lt__(self, other):
+        return (self.time, self.priority) < (other.time, other.priority)
+
+    def __repr__(self):
+        return 'Passenger@t{}'.format(self.time)
+
+    def trigger(self, HVs, AVs):
+        Passenger(self.time, self.args[0], self.args[1], self.args[2], self.args[3], HVs, AVs)

@@ -1,6 +1,10 @@
 {
   "map_file": "Network_map/edgeList.csv",
-  "passenger_file": "training_morning_1_test.csv",
-  "HV_fleet_size": 50,
-  "AV_fleet_size": 5
+  "passenger_file": "training_morning_1.csv",
+  "data_output_path": "../Results/Simulation_Outputs",
+  "output_number": 1,
+  "HV_fleet_size": 1800,
+  "AV_fleet_size": 200,
+  "load_vehicle_span": 900,
+  "match_interval": 10
 }

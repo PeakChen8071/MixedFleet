@@ -1,38 +1,49 @@
 import time
 import heapq
 
-from Supply import deploy_HV, deploy_AV, HV, AV
-from Demand import simulationEndTime, load_passengers, Passenger
-from Interaction import update_phi, compute_assignment, Events
+from Configuration import configs
+from Basics import eventQueue
+from Control import write_results
+from Supply import load_vehicles, HVs, AVs, parkedAVs, CruiseTrip
+from Demand import load_passengers, NewPassenger, UpdatePhi
+from Interaction import Assign
 
-# EventTypes = {0: 'Update_phi', 1: 'Passenger', 2: 'Cruise', 3: 'Assignment'}
 _t0 = time.time()
 
-deploy_HV()  # Randomly deploy Vehicles based on Configs
-deploy_AV()
-load_passengers()  # Load passengers into Events
+load_vehicles()  # Randomly deploy Vehicles based on Configs
+simulationEndTime = load_passengers(1/6)  # Load passengers into Events
+print('Last passenger at {} sec.'.format(simulationEndTime))
 
-t = 0
-while (t < simulationEndTime + 1) and (len(Events) != 0):
-    event = heapq.heappop(Events)
-    eventType = event[1]
-    t = event[0]
+for t in range(0, simulationEndTime + configs['match_interval'], configs['match_interval']):
+    Assign(t)  # Schedule assignment events, finish with assignment to catch all passengers
 
-    if eventType == 0:
-        update_phi()
-    elif eventType == 1:
-        Passenger(t, event[3], event[4], event[5], event[6], HV.HV_v.values(), AV.AV_v.values())
-    # elif eventType == 2:
-    #     vehicle_id = event[2]
-    #     if vehicle_id in HV.HV_v.keys():
-    #         HV.HV_v[vehicle_id].cruise()
-    #     elif vehicle_id in AV.AV_v.keys():
-    #         AV.AV_v[vehicle_id].cruise()
-    #     else:
-    #         raise ValueError('Cruising vehicle is not available.')
+# Execute event queue, sorted by Time and Priority
+while len(eventQueue) != 0:
+    e = heapq.heappop(eventQueue)
+
+    if isinstance(e, CruiseTrip) and e.time > simulationEndTime:
+        e.trigger(end=True)
+    elif isinstance(e, UpdatePhi):
+        e.trigger(len(HVs), len(AVs))
+    elif isinstance(e, NewPassenger):
+        e.trigger(HVs.values(), AVs.values())
+    else:
+        e.trigger()
+
+    # # Change AV numbers
+    # if (e.time >= 3600) and (e.time < 7200):
+    #     while len(AVs) > 50:
+    #         for v in AVs.values():
+    #             v.deactivate()
+    # elif e.time >= 7200:
+    #     for v in parkedAVs:
+    #         v.activate()
+
+# TODO: Account for incomplete events
+# 1. Non-expired and Non-assigned passengers
+
+# # Output relevant results
+# write_results(configs['data_output_path'], configs['output_number'])
 
 
-# for t in range(1, simulationEndTime+1, 10):
-#     heapq.heappush(Events, (t, 2))
-
-print('Time elapsed: {:4d} sec.'.format(int(time.time() - _t0)))
+print('Simulation ended in: {:4d} sec.'.format(int(time.time() - _t0)))
