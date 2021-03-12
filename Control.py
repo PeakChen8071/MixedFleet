@@ -2,10 +2,10 @@ import math
 import pandas as pd
 
 
-vehicle_data = {'deploy_t':{}, 'is_HV': {}}  # TODO: record trip OD (vehicle state transition)?
-passenger_data = {'start_t': {}, 'expire_t': {}, 'trip_d': {}, 'fare': {}, 'prefer_HV': {}, 'expired': {}}
-assignment_data = {'v_id': {}, 'p_id': {}, 'assignment_t': {}, 'dispatch_t': {}, 'delivery_t': {},
-                   'dispatch_d': {}}
+vehicle_data = []
+passenger_data = []
+expiration_data = []
+assignment_data = []
 
 
 class Variables:
@@ -16,7 +16,7 @@ class Variables:
     AVf2 = 1.5 / 1000  # Default AV unit fare, $1.5 / km
 
     unitWage = 20 / 100
-    occupancy = 0.0
+    occupancy = 0.0  # mean(Occupied time / Vacant time)
     # Join_Leave = U(unitWage, (average) occupancy)
 
     phiHV = 1.0  # Default approximation ratio, function of nHV and pHV
@@ -30,9 +30,14 @@ def compute_phi(nP, nV):
 
 
 def write_results(path, number):
-    pd.DataFrame.from_dict(vehicle_data).to_csv('{}/vehicle_data_{}.csv'
-                                                .format(path, number), index_label='v_id')
-    pd.DataFrame.from_dict(passenger_data).to_csv('{}/passenger_data_{}.csv'
-                                                  .format(path, number), index_label='p_id')
-    pd.DataFrame.from_dict(assignment_data).to_csv('{}/assignment_data_{}.csv'
-                                                   .format(path, number), index_label='trip_id')
+    pd.DataFrame(vehicle_data, columns=['v_id', 'is_HV', 'time', 'activation']
+                 ).to_csv('{}/vehicle_data_{}.csv'.format(path, number), index=False)
+
+    pd.DataFrame(passenger_data, columns=['p_id', 'start_t', 'trip_d', 'VoT', 'fare', 'prefer_HV']
+                 ).to_csv('{}/passenger_data_{}.csv'.format(path, number), index=False)
+
+    pd.DataFrame(expiration_data, columns=['p_id', 'expire_t']
+                 ).to_csv('{}/expiration_data_{}.csv'.format(path, number), index=False)
+
+    pd.DataFrame(assignment_data, columns=['v_id', 'p_id', 'dispatch_t', 'meeting_t', 'delivery_t', 'dispatch_d']
+                 ).to_csv('{}/assignment_data_{}.csv'.format(path, number), index=False)

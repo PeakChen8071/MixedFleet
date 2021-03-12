@@ -1,10 +1,9 @@
 from itertools import count
-from scipy.stats import truncnorm
 import numpy as np
 
 from Parser import read_passengers
 from Basics import Event, Location, duration_between
-from Control import Variables, compute_phi, passenger_data
+from Control import Variables, compute_phi, passenger_data, expiration_data
 
 
 def load_passengers(fraction=1, rows=None):
@@ -15,15 +14,16 @@ def load_passengers(fraction=1, rows=None):
         UpdatePhi(t)
 
     # Create passenger events
-    for idx, p in passenger_df.iterrows():
-        NewPassenger(int(p['time']),
-                     Location(p['origin_loc_source'],
-                              p['origin_loc_target'],
-                              p['origin_loc_distance']),
-                     Location(p['destination_loc_source'],
-                              p['destination_loc_target'],
-                              p['destination_loc_distance']),
-                     p['trip_distance'], int(p['trip_duration']))
+    for p in passenger_df.itertuples():
+        NewPassenger(p.time,
+                     Location(p.origin_loc_source,
+                              p.origin_loc_target,
+                              p.origin_loc_distance),
+                     Location(p.destination_loc_source,
+                              p.destination_loc_target,
+                              p.destination_loc_distance),
+                     p.trip_distance, p.trip_duration,
+                     p.patience, p.VoT)
 
     return passenger_df['time'].max()
 
@@ -33,22 +33,23 @@ class Passenger:
     p_HV = {}
     p_AV = {}
 
-    def __init__(self, time, origin, destination, trip_distance, trip_duration, HVs=None, AVs=None):
+    def __init__(self, time, origin, destination, trip_distance, trip_duration, patience, VoT, HVs=None, AVs=None):
         self.id = next(self._ids)
         self.startTime = time
-        self.expiredTime = time + int(truncnorm.rvs(a=-10, b=10, loc=60, scale=6))  # TODO: patience
-        self.VoT = int(truncnorm.rvs(a=-10, b=10, loc=50/3600, scale=5/3600))  # TODO: value of time
         self.origin = origin
         self.destination = destination
         self.tripDistance = trip_distance
         self.tripDuration = trip_duration
+        self.expiredTime = time + patience
+        self.VoT = VoT  # Value of time ($/hr)
         self.preferHV, self.fare = Passenger.choose_vehicle(self, HVs, AVs)
         if self.preferHV:
             Passenger.p_HV[self.id] = self
         else:
             Passenger.p_AV[self.id] = self
 
-        self.record_output()
+        # Record data ['p_id', 'start_t', 'trip_d', 'VoT', 'fare', 'prefer_HV']
+        passenger_data.append([self.id, self.startTime, self.tripDistance, self.VoT, self.fare, self.preferHV])
 
     def __repr__(self):
         return 'Passenger_{}'.format(self.id)
@@ -64,37 +65,31 @@ class Passenger:
         fare_HV = Variables.HVf1 + Variables.HVf2 * self.tripDistance
         fare_AV = Variables.AVf1 + Variables.AVf2 * self.tripDistance
 
-        # Generalised cost = Fare + VoT * distanceRatio * TimeToNearestVehicle
-        GC_HV = fare_HV + self.VoT * Variables.phiHV * self.min_wait_time(HV_v)
-        GC_AV = fare_AV + self.VoT * Variables.phiAV * self.min_wait_time(AV_v)
+        # TODO: Include IVTT cost as part of GC?
+        # Generalised cost = Fare + VoT / 3600 * distanceRatio * TimeToNearestVehicle
+        GC_HV = fare_HV + self.VoT / 3600 * Variables.phiHV * self.min_wait_time(HV_v)
+        GC_AV = fare_AV + self.VoT / 3600 * Variables.phiAV * self.min_wait_time(AV_v)
 
         # Logit choice based on GC (dis-utility) of vehicles
         if np.random.rand() <= np.exp(-GC_HV) / (np.exp(-GC_HV) + np.exp(-GC_AV)):
-            return True, fare_HV
+            return True, fare_HV  # Prefer HV
         else:
-            return False, fare_AV
+            return False, fare_AV  # Prefer AV
 
     def check_expiration(self, t):
         if t >= self.expiredTime:
-            passenger_data['expired'][self.id] = True
-
             if self.preferHV:
                 del Passenger.p_HV[self.id]
             else:
                 del Passenger.p_AV[self.id]
 
-    def record_output(self):
-        passenger_data['start_t'].update({self.id: self.startTime})
-        passenger_data['expire_t'].update({self.id: self.expiredTime})
-        passenger_data['trip_d'].update({self.id: self.tripDistance})
-        passenger_data['fare'].update({self.id: self.fare})
-        passenger_data['prefer_HV'].update({self.id: self.preferHV})
-        passenger_data['expired'].update({self.id: False})
+            # Record data ['p_id', 'expire_t']
+            expiration_data.append([self.id, self.expiredTime])
 
 
 class UpdatePhi(Event):
     def __init__(self, time):
-        super().__init__(time, priority=1)
+        super().__init__(time, priority=2)
 
     def __lt__(self, other):
         return (self.time, self.priority) < (other.time, other.priority)
@@ -109,7 +104,7 @@ class UpdatePhi(Event):
 
 class NewPassenger(Event):
     def __init__(self, time, *args):
-        super().__init__(time, priority=2)
+        super().__init__(time, priority=3)
         self.args = args
 
     def __lt__(self, other):
@@ -119,4 +114,4 @@ class NewPassenger(Event):
         return 'Passenger@t{}'.format(self.time)
 
     def trigger(self, HVs, AVs):
-        Passenger(self.time, self.args[0], self.args[1], self.args[2], self.args[3], HVs, AVs)
+        Passenger(self.time, *self.args, HVs, AVs)

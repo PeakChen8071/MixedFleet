@@ -1,10 +1,13 @@
 {
   "map_file": "Network_map/edgeList.csv",
+  "shortest_time_file": "Network_map/shortest_time.csv",
   "passenger_file": "training_morning_1.csv",
   "data_output_path": "../Results/Simulation_Outputs",
-  "output_number": 1,
-  "HV_fleet_size": 1800,
-  "AV_fleet_size": 200,
-  "load_vehicle_span": 900,
+  "depot_nodes": [2512378850, 42429215, 42433554, 370924957, 42432818],
+  "output_number": 0,
+  "HV_fleet_size": 240,
+  "AV_fleet_size": 1000,
+  "AV_initial_size": 40,
+  "load_vehicle_span": 600,
   "match_interval": 10
 }
