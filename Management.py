@@ -1,10 +1,10 @@
 import networkx as nx
 
 from Configuration import configs
-from Basics import Event, duration_between, distance_between
-from Control import assignment_data
+from Basics import Event, duration_between
+from Control import assignment_data, Variables
 from Demand import Passenger
-from Supply import HVs, activeAVs, CruiseTrip, ActivateAVs, DeactivateAVs
+from Supply import HVs, activeAVs, TripCompletion, ActivateAVs, DeactivateAVs, cruiseAV
 
 
 # Bipartite matching which minimises the total dispatch trip duration
@@ -30,11 +30,13 @@ def bipartite_match(vacant_v, waiting_p):
 
 def compute_assignment(t):
     for v in (HVs | activeAVs).values():
-        v.update_loc(t)  # Update vehicle locations
+        # v.update_loc(t)  # Update vehicle location
+        v.time = t  # Update vehicle time
 
     for p in (Passenger.p_HV | Passenger.p_AV).values():
         p.check_expiration(t)  # Remove expired passengers
 
+    # Compute and return minimum weighting maximal bipartite matching
     HV_match = bipartite_match(HVs.values(), Passenger.p_HV.values())
     AV_match = bipartite_match(activeAVs.values(), Passenger.p_AV.values())
     return HV_match, AV_match
@@ -51,38 +53,45 @@ class Assign(Event):
         return 'Assignment@t{}'.format(self.time)
 
     def match(self, match_results):
-        if match_results is not None:
+        if match_results:
             for m in match_results:
                 v = m[0]  # Assigned vehicle
                 p = m[1]  # Assigned passenger
                 meeting_t = self.time + m[2]  # Timestamp of meeting
-                delivery_t = meeting_t + p.tripDuration  # Timestamp of drop-ff
+                delivery_t = meeting_t + p.tripDuration  # Timestamp of drop-off
+                v.occupiedTime += p.tripDuration  # Update vehicle occupied duration
 
-                # Vehicle and passenger are assigned, and removed from list
+                # Vehicle and passenger are assigned and removed from available dictionaries
                 if v.is_HV:
                     del HVs[v.id]
                     del Passenger.p_HV[p.id]
+
+                    # HVs receive incomes (wage = unit wage * trip duration)
+                    v.income += Variables.unitWage * p.tripDuration
                 else:
                     del activeAVs[v.id]
                     del Passenger.p_AV[p.id]
 
-                # Vehicle delivers passenger to passenger destination, then starts another CruiseTrip
+                # Vehicle delivers passenger to passenger destination
                 v.time = delivery_t
                 v.loc = p.destination
-                v.nextCruise = CruiseTrip(delivery_t, v, drop_off=True)
 
-                # Record data ['v_id', 'p_id', 'dispatch_t', 'meeting_t', 'delivery_t', 'dispatch_d']
-                assignment_data.append([v.id, p.id, self.time, meeting_t, delivery_t, distance_between(v.loc, p.origin)])
+                # Their next trip planning occurs after delivery trip completion
+                v.nextTrip = TripCompletion(delivery_t, v, drop_off=True)
 
-    def trigger(self):
-        HV_match, AV_match = compute_assignment(self.time)
-        self.match(HV_match)
-        self.match(AV_match)
+                # Record data ['v_id', 'p_id', 'dispatch_t', 'meeting_t', 'delivery_t']
+                assignment_data.append([v.id, p.id, self.time, meeting_t, delivery_t])
+
+    def trigger(self, end=False):
+        if not end:
+            HV_match, AV_match = compute_assignment(self.time)
+            self.match(HV_match)
+            self.match(AV_match)
 
 
 # Schedule assignment events, finish with assignment to catch all passengers
 def schedule_assignment(endTime):
-    for t in range(0, endTime + configs['match_interval'], configs['match_interval']):
+    for t in range(0, endTime, configs['match_interval']):
         Assign(t)
 
 

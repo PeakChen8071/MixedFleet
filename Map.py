@@ -1,21 +1,21 @@
 import networkx as nx
 import matplotlib.pyplot as plt
 
-from Parser import read_edgeList, depot_nodes
+from Parser import map_file, depot_nodes
 
 
 # Construct Networkx directed graph based on parsed edge list
-edgeList, source, target, edge_attr = read_edgeList()
-G = nx.convert_matrix.from_pandas_edgelist(edgeList, source, target, edge_attr, nx.DiGraph)
-nx.set_node_attributes(G, edgeList['pos'].to_dict(), 'pos')  # Inject node data
+G = nx.read_shp(map_file , geom_attrs=False)
+nx.set_node_attributes(G, {n: n for n in G.nodes}, 'pos')
+nx.relabel_nodes(G, {k[1]: v for k, v in nx.get_edge_attributes(G, 'to_node').items()}, False)
 
 
 def plot_map():
-    node_pos = nx.get_node_attributes(G, 'pos')
     fig, ax = plt.subplots(figsize=(8, 8), dpi=600, tight_layout=True)
     ax.set_aspect('equal')
-    nx.draw(G, node_pos, arrows=False, node_size=0, edge_color='grey')
-    nx.draw_networkx_nodes(G, node_pos, depot_nodes, node_size=5, node_shape='o', node_color='r', label='Depots')
+    nx.draw(G, nx.get_node_attributes(G, 'pos'), arrows=False, node_size=0, edge_color='grey')
+    nx.draw_networkx_nodes(G, nx.get_node_attributes(G, 'pos'), depot_nodes,
+                           node_size=5, node_shape='o', node_color='r', label='Depots')
     plt.show()
 
 

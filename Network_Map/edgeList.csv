@@ -1,4 +1,4 @@
-from_node,to_node,road_id,from_node_lon,from_node_lat,to_node_lon,to_node_lat,length,travel_time
+from_node,to_node,road_id,from_node_lon,from_node_lat,to_node_lon,to_node_lat,distance,duration
 42421728,42432736,0,-73.9600434,40.7980486,-73.9595485,40.798725,86.00049778,23
 42421728,42435337,1,-73.9600434,40.7980486,-73.9605358,40.7973755,85.57742468,24
 42421728,42421731,2,-73.9600434,40.7980486,-73.9614743,40.798645,137.6602511,38
