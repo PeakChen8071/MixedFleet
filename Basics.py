@@ -18,28 +18,23 @@ def validate_passengers(passenger_file):
     if 'patience' not in cols:
         print('Injecting passenger attributes...')
         df = pd.read_csv(configs["passenger_file"])
-        df['tpep_pickup_datetime'] = (pd.to_datetime(df['tpep_pickup_datetime']) -
-                                      pd.Timestamp("1970-01-01")) // pd.Timedelta('1s')
-
-        # Create trip OD locations
-        df['Location_o'] = df.apply(lambda x: Location(x['o_source'], x['o_target'], x['o_loc']), axis=1)
-        df['Location_d'] = df.apply(lambda x: Location(x['d_source'], x['d_target'], x['d_loc']), axis=1)
+        df['tpep_pickup_datetime'] = (pd.to_datetime(df['tpep_pickup_datetime']) - pd.Timestamp('1970-01-01')) // pd.Timedelta('1s')
 
         # Calculate trip properties for access in future simulations
-        df['trip_distance'] = df.apply(lambda x: distance_between(x['Location_o'], x['Location_d']), axis=1)
-        df['trip_duration'] = df.apply(lambda x: duration_between(x['Location_o'], x['Location_d']), axis=1)
+        df['trip_distance'] = df.apply(lambda x: distance_between(Location(x['o_source'], x['o_target'], x['o_loc']),
+                                                                  Location(x['d_source'], x['d_target'], x['d_loc'])), axis=1)
+        df['trip_duration'] = df.apply(lambda x: duration_between(Location(x['o_source'], x['o_target'], x['o_loc']),
+                                                                  Location(x['d_source'], x['d_target'], x['d_loc'])), axis=1)
 
         # Random patience time (sec) ~ Normal(60, 6^2) bounded by [30, 90]
-        df['patience'] = truncnorm.rvs(a=-5, b=5, loc=60, scale=6, size=df.shape[0])
-        df['patience'] = df['patience'].astype(int)
+        df['patience'] = truncnorm.rvs(a=-5, b=5, loc=60, scale=6, size=df.shape[0]).astype(int)
 
         # Random VoT ($/hr) ~ Normal(32, 3.2^2) bounded by [22, 38], rounded to int. (NYC HDM, 2018 household income)
         # VoT might be underestimated for Manhattan which is a relatively high-income area (Ulak, et al., 2020)
         df['VoT'] = truncnorm.rvs(a=-3.125, b=1.875, loc=32, scale=3.2, size=df.shape[0])
 
         # Write back to passenger file with injected attributes
-        df.drop(columns=['Location_o', 'Location_d']).sort_values(
-            'tpep_pickup_datetime').to_csv(configs["passenger_file"], index=False)
+        df.sort_values('tpep_pickup_datetime').to_csv(configs["passenger_file"], index=False)
         print('Attribute injection is completed.')
 
 
@@ -51,7 +46,7 @@ def random_loc():
 
 
 def path_between(from_loc, to_loc):
-    assert (not isinstance(from_loc, Location)) | (not isinstance(to_loc, Location)), 'Path must be calculated between 2 locations.'
+    assert (isinstance(from_loc, Location) and isinstance(to_loc, Location)), 'Path must be calculated between 2 locations.'
     if (from_loc.source is to_loc.source) and (from_loc.target is to_loc.target) and (from_loc.timeFromSource < to_loc.timeFromSource):
         return None  # There is no path if both are on the same road, and vehicle is upstream to passenger
     return nx.shortest_path(G, from_loc.target, to_loc.source, weight='duration')
@@ -118,7 +113,7 @@ class Location:
 class Event:
     """ Event priorities, the triggering order at the same time
 
-        0 : NewHV, ActivateAVs/DeactivateAVs
+        0 : NewHV, ActivateAVs/DeactivateAVs, UpdateStats
         1 : TripCompletion
         2 : UpdatePhi
         3 : NewPassenger

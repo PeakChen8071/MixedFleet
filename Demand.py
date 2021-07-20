@@ -3,7 +3,7 @@ import numpy as np
 
 from Parser import read_passengers
 from Basics import Event, Location, duration_between
-from Control import Variables, compute_phi, passenger_data, expiration_data
+from Control import Variables, compute_phi, Statistics
 
 
 def load_passengers(fraction=1, hours=18):
@@ -19,7 +19,8 @@ def load_passengers(fraction=1, hours=18):
         NewPassenger(p.time, Location(p.o_source, p.o_target, p.o_loc), Location(p.d_source, p.d_target, p.d_loc),
                      p.trip_distance, p.trip_duration, p.patience, p.VoT)
 
-    return passenger_df['time'].max()
+    Statistics.simulationEndTime = passenger_df['time'].max()
+    Statistics.lastPassengerTime = passenger_df['time'].max()
 
 
 class Passenger:
@@ -44,7 +45,7 @@ class Passenger:
                 Passenger.p_AV[self.id] = self
 
         # Record data ['p_id', 'request_t', 'trip_d', 'trip_t', 'VoT', 'fare', 'prefer_HV']
-        passenger_data.append([self.id, self.requestTime, self.tripDistance, self.tripDuration, self.VoT, self.fare, self.preferHV])
+        Statistics.passenger_data.append([self.id, self.requestTime, self.tripDistance, self.tripDuration, self.VoT, self.fare, self.preferHV])
 
     def __repr__(self):
         return 'Passenger_{}'.format(self.id)
@@ -56,9 +57,9 @@ class Passenger:
         return nearest_time
 
     def choose_vehicle(self, HV_v, AV_v):
-        # Fare = Flag price + Unit price * Trip distance
-        fare_HV = Variables.HVf1 + Variables.HVf2 * self.tripDistance
-        fare_AV = Variables.AVf1 + Variables.AVf2 * self.tripDistance
+        # Fare = Flag price + Unit price * Trip duration
+        fare_HV = Variables.HVf1 + Variables.HVf2 * self.tripDuration
+        fare_AV = Variables.AVf1 + Variables.AVf2 * self.tripDuration
 
         # TODO: When instantaneous demand > supply, provide accurate ETA. Currently capped min(ETA) = 20 min
         # Generalised cost = Fare + VoT / 3600 * (Estimation ratio * Time to the nearest vacant vehicle)
@@ -83,7 +84,7 @@ class Passenger:
                 del Passenger.p_AV[self.id]
 
             # Record data ['p_id', 'expire_t']
-            expiration_data.append([self.id, self.expiredTime])
+            Statistics.expiration_data.append([self.id, self.expiredTime])
 
 
 class UpdatePhi(Event):

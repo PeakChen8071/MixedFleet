@@ -4,10 +4,10 @@
   "data_output_path": "../Results/Simulation_Outputs",
   "HV_fleet_size": 2500,
   "maximum_work_duration": 43200,
-  "AV_fleet_size": 1000,
-  "AV_initial_size": 100,
+  "AV_fleet_size": 800,
+  "AV_initial_size": 150,
   "depot_nodes": [2512378850, 42429215, 42433554, 370924957, 42432818],
   "AV_cruise_mode": false,
   "match_interval": 10,
-  "output_number": 0
+  "output_number": 3
 }
