@@ -1,20 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="ChangeListManager">
-    <list default="true" id="3eff8e29-2806-48a3-ae8e-87b7b61bf138" name="Default Changelist" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Config.json" beforeDir="false" afterPath="$PROJECT_DIR$/Config.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Control.py" beforeDir="false" afterPath="$PROJECT_DIR$/Control.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/DailyTrips_June1.csv" beforeDir="false" afterPath="$PROJECT_DIR$/DailyTrips_June1.csv" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Demand.py" beforeDir="false" afterPath="$PROJECT_DIR$/Demand.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Management.py" beforeDir="false" afterPath="$PROJECT_DIR$/Management.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Map.py" beforeDir="false" afterPath="$PROJECT_DIR$/Map.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Network_Map/edgeList.dbf" beforeDir="false" afterPath="$PROJECT_DIR$/Network_Map/edgeList.dbf" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Network_Map/edgeList.shp" beforeDir="false" afterPath="$PROJECT_DIR$/Network_Map/edgeList.shp" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Network_Map/edgeList.shx" beforeDir="false" afterPath="$PROJECT_DIR$/Network_Map/edgeList.shx" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Simulation.py" beforeDir="false" afterPath="$PROJECT_DIR$/Simulation.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/Supply.py" beforeDir="false" afterPath="$PROJECT_DIR$/Supply.py" afterDir="false" />
-    </list>
+    <list default="true" id="3eff8e29-2806-48a3-ae8e-87b7b61bf138" name="Default Changelist" comment="" />
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
     <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
@@ -149,13 +136,21 @@
       <option name="project" value="LOCAL" />
       <updated>1626796472941</updated>
     </task>
-    <option name="localTasksCounter" value="6" />
+    <task id="LOCAL-00006" summary="simulation plant v1.1">
+      <created>1628230636300</created>
+      <option name="number" value="00006" />
+      <option name="presentableId" value="LOCAL-00006" />
+      <option name="project" value="LOCAL" />
+      <updated>1628230636300</updated>
+    </task>
+    <option name="localTasksCounter" value="7" />
     <servers />
   </component>
   <component name="VcsManagerConfiguration">
     <MESSAGE value="Prototype" />
     <MESSAGE value="AV activation/deactivation" />
     <MESSAGE value="simulation plant v1.0" />
-    <option name="LAST_COMMIT_MESSAGE" value="simulation plant v1.0" />
+    <MESSAGE value="simulation plant v1.1" />
+    <option name="LAST_COMMIT_MESSAGE" value="simulation plant v1.1" />
   </component>
 </project>
