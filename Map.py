@@ -1,3 +1,5 @@
+import geopandas as gpd
+import momepy
 import networkx as nx
 import matplotlib.pyplot as plt
 
@@ -5,12 +7,14 @@ from Parser import map_file, depot_nodes
 
 
 # Construct Networkx directed graph based on parsed edge list
-G = nx.read_shp(map_file , geom_attrs=False)
+network = gpd.read_file('../Code/Network_Map/edgeList.shp')
+network = network.to_crs('epsg:2263')  # Manhattan EPSG
+G = momepy.gdf_to_nx(network, multigraph=False, directed=True, length='distance')
 nx.set_node_attributes(G, {n: n for n in G.nodes}, 'pos')
 nx.relabel_nodes(G, {k[1]: v for k, v in nx.get_edge_attributes(G, 'to_node').items()}, False)
 
 
-def plot_map():
+def plot_depots():
     fig, ax = plt.subplots(figsize=(8, 8), dpi=600, tight_layout=True)
     ax.set_aspect('equal')
     nx.draw(G, nx.get_node_attributes(G, 'pos'), arrows=False, node_size=0, edge_color='grey')

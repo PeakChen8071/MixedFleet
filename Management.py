@@ -56,7 +56,8 @@ class Assign(Event):
     def __repr__(self):
         return 'Assignment@t{}'.format(self.time)
 
-    def match(self, match_results):
+    def transport(self, match_results):
+        global test_output
         if match_results:
             for m in match_results:
                 v = m[0]  # Assigned vehicle
@@ -65,11 +66,6 @@ class Assign(Event):
                 delivery_t = meeting_t + p.tripDuration  # Timestamp of drop-off
                 v.occupiedTime = p.tripDuration  # Update vehicle occupied duration
 
-                if meeting_t < Statistics.lastPassengerTime:
-                    UpdateOccupied(meeting_t, v.is_HV, 1)
-                if delivery_t < Statistics.lastPassengerTime:
-                    UpdateOccupied(delivery_t, v.is_HV, -1)
-
                 # Vehicle and passenger are assigned and removed from available dictionaries
                 if v.is_HV:
                     del HVs[v.id]
@@ -77,6 +73,7 @@ class Assign(Event):
 
                     # HVs receive incomes (wage = unit wage * trip duration)
                     v.income += Variables.unitWage * p.tripDuration
+
                 else:
                     del activeAVs[v.id]
                     del Passenger.p_AV[p.id]
@@ -90,14 +87,20 @@ class Assign(Event):
                 # Their next trip planning occurs after delivery trip completion
                 v.nextTrip = TripCompletion(delivery_t, v, drop_off=True)
 
+                # Update system statistics
+                if meeting_t < Statistics.lastPassengerTime:
+                    UpdateOccupied(meeting_t, v.is_HV, 1)
+                if delivery_t < Statistics.lastPassengerTime:
+                    UpdateOccupied(delivery_t, v.is_HV, -1)
+
                 # Record data ['v_id', 'p_id', 'dispatch_t', 'meeting_t', 'delivery_t']
                 Statistics.assignment_data.append([v.id, p.id, self.time, meeting_t, delivery_t])
 
     def trigger(self, end=False):
         if not end:
             HV_match, AV_match = compute_assignment(self.time)
-            self.match(HV_match)
-            self.match(AV_match)
+            self.transport(HV_match)
+            self.transport(AV_match)
 
 
 # Schedule assignment events, finish with assignment to catch all passengers

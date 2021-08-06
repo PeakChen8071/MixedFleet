@@ -35,13 +35,14 @@ def load_vehicles():
     shift_start = []
     shift_start += [int(3600 * i) for i in truncnorm.rvs(-3, 3, 3, 1, morning)]
     shift_start += [int(3600 * i) for i in truncnorm.rvs(-2, 2, 9, 2, afternoon)]
-    shift_start += [int(3600 * i) for i in truncnorm.rvs(-1.5, 1.5, 15, 2, evening)]
+    shift_start += [int(3600 * i) for i in truncnorm.rvs(-1, 1.5, 15, 2, evening)]
     # np.random.shuffle(shift_start)
 
     neoList = [k <= 0.5 for k in np.random.rand(total)]  # Proportion of neoclassical HVs
 
-    hourlyCost = list(np.random.uniform(20, 60, total))
-    targetIncome = list(np.random.uniform(60, 360, total))
+    # hourlyCost = list(np.random.uniform(20, 60, total))
+    hourlyCost = list(truncnorm.rvs(a=-0.5, b=3, loc=20, scale=10, size=total))
+    targetIncome = list(np.random.uniform(50, 300, total))
 
     for i in range(total):
         NewHV(shift_start[i], random_loc(), neoList[i], hourlyCost[i], targetIncome[i])

@@ -3,7 +3,7 @@ import heapq
 
 from Configuration import configs
 from Basics import eventQueue, validate_passengers
-from Control import Statistics, write_results
+from Control import Statistics, set_wage, write_results
 from Supply import load_vehicles, HVs, activeAVs, DeactivateAVs, TripCompletion
 from Demand import load_passengers, NewPassenger, UpdatePhi, Passenger
 from Management import schedule_assignment
@@ -26,6 +26,14 @@ schedule_assignment(Statistics.lastPassengerTime)
 
 while len(eventQueue) != 0:
     event = heapq.heappop(eventQueue)
+
+    # if event.time == 9 * 3600:
+    #     set_wage(45 / 3600)
+    # elif event.time == 11 * 3600:
+    #     set_wage(40 / 3600)
+    # elif event.time == 14 * 3600:
+    #     set_wage(60 / 3600)
+
     if event.time <= Statistics.lastPassengerTime:
         # Execute event queue, sorted by Time and Priority
         if isinstance(event, UpdatePhi):

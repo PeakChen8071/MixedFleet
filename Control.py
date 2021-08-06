@@ -1,5 +1,6 @@
-import math
+import numpy as np
 import pandas as pd
+import do_mpc
 
 
 class Statistics:
@@ -17,7 +18,6 @@ class Statistics:
     HV_total = 0
     HV_trips = 0
     HV_no = 0
-
     AV_trips = 0
     AV_no = 0
 
@@ -25,15 +25,15 @@ class Statistics:
 class Variables:
     # Passenger fare variables
     HVf1 = 3.0  # Default HV flag fare, $3.0
-    HVf2 = 0.5 / 60  # Default HV unit fare, $0.5 / min
+    HVf2 = 0.8 / 60  # Default HV unit fare, $0.8 / min
     AVf1 = 6.0  # Default AV flag fare, $6.0
-    AVf2 = 0.3 / 60  # Default HV unit fare, $0.3 / min
+    AVf2 = 0.6 / 60  # Default HV unit fare, $0.6 / min
 
-    # Fixed generalised cost, representing alternative mode choices. Assume $2 trip cost + $18 waiting cost
-    others_GC = 20
+    # Fixed generalised cost, representing alternative mode choices. Assume $5 trip cost + $20 waiting cost
+    others_GC = 25
 
     # Driver wage variables
-    unitWage = 60 / 3600  # Income = Unit wage (per second) * Trip duration
+    unitWage = 40 / 3600  # Income = Unit wage (per second) * Trip duration
 
     # Driver join/exit market variables
     HV_utilisation = 0.6  # Initial utilisation ratio for expected revenue estimation
@@ -44,11 +44,16 @@ class Variables:
     phiAV = 1.0  # Default ETA ratio, function of nAV and pAV
 
 
+def set_wage(wage=None):
+    if wage is not None:
+        Variables.unitWage = wage
+
+
 def compute_phi(nP, nV):
     # TODO: Improve estimation model
     less = min(nP, nV)
     more = max(nP, nV)
-    return max(1.0, math.exp(0.16979338 + 0.03466977 * less - 0.0140257 * more))
+    return max(1.0, np.exp(0.16979338 + 0.03466977 * less - 0.0140257 * more))
 
 
 def write_results(path, number):

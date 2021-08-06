@@ -61,14 +61,13 @@ class Passenger:
         fare_HV = Variables.HVf1 + Variables.HVf2 * self.tripDuration
         fare_AV = Variables.AVf1 + Variables.AVf2 * self.tripDuration
 
-        # TODO: When instantaneous demand > supply, provide accurate ETA. Currently capped min(ETA) = 20 min
+        # TODO: When instantaneous demand > supply, give accurate ETA. Now capped ETA = 20 min, use search radius
         # Generalised cost = Fare + VoT / 3600 * (Estimation ratio * Time to the nearest vacant vehicle)
         GC_HV = fare_HV + self.VoT / 3600 * Variables.phiHV * min(self.min_wait_time(HV_v), 1200)
         GC_AV = fare_AV + self.VoT / 3600 * Variables.phiAV * min(self.min_wait_time(AV_v), 1200)
 
         # Logit choice based on GC (dis-utility) of vehicles
-        _c = np.random.choice(['HV', 'AV', 'others'],
-                              p=np.exp([-GC_HV, -GC_AV, -Variables.others_GC]) / (np.exp(-GC_HV) + np.exp(-GC_AV) + np.exp(-Variables.others_GC)))
+        _c = np.random.choice(['HV', 'AV', 'others'], p=np.exp([-GC_HV, -GC_AV, -Variables.others_GC]) / sum(np.exp([-GC_HV, -GC_AV, -Variables.others_GC])))
         if _c == 'HV':
             return True, fare_HV  # Prefer HV
         elif _c == 'AV':
