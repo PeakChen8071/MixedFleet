@@ -1,14 +1,20 @@
 from itertools import count
 import numpy as np
+import pandas as pd
 
+from Configuration import configs
 from Parser import read_passengers
 from Basics import Event, Location, duration_between
-from Control import Variables, compute_phi, Statistics
+from Control import Statistics, Parameters, Variables, compute_phi
 
 
 def load_passengers(fraction=1, hours=18):
     passenger_df = read_passengers(fraction, hours)
-    passenger_df['time'] = passenger_df['time']
+    lastPaxTime = passenger_df['time'].max()
+
+    # Set demand prediction values
+    bins = [i for i in range(0, lastPaxTime, configs['MPC_prediction_interval'])]
+    Variables.histDemand = passenger_df['time'].groupby(pd.cut(passenger_df['time'], bins)).count().tolist()
 
     # Update values of phi before creating new passengers
     for t in passenger_df['time'].unique():
@@ -19,8 +25,8 @@ def load_passengers(fraction=1, hours=18):
         NewPassenger(p.time, Location(p.o_source, p.o_target, p.o_loc), Location(p.d_source, p.d_target, p.d_loc),
                      p.trip_distance, p.trip_duration, p.patience, p.VoT)
 
-    Statistics.simulationEndTime = passenger_df['time'].max()
-    Statistics.lastPassengerTime = passenger_df['time'].max()
+    Statistics.simulationEndTime = lastPaxTime
+    Statistics.lastPassengerTime = lastPaxTime
 
 
 class Passenger:
@@ -36,7 +42,7 @@ class Passenger:
         self.tripDistance = trip_distance
         self.tripDuration = trip_duration
         self.expiredTime = time + patience
-        self.VoT = VoT  # Value of time ($/hr)
+        self.VoT = VoT / 3600 # Value of time ($/sec)
         self.preferHV, self.fare = Passenger.choose_vehicle(self, HVs, AVs)
         if self.preferHV is not None:
             if self.preferHV:
@@ -44,12 +50,19 @@ class Passenger:
             elif ~self.preferHV:
                 Passenger.p_AV[self.id] = self
 
-        # Record data ['p_id', 'request_t', 'trip_d', 'trip_t', 'VoT', 'fare', 'prefer_HV']
-        Statistics.passenger_data.append([self.id, self.requestTime, self.tripDistance, self.tripDuration, self.VoT, self.fare, self.preferHV])
+        # Record statistics
+        Statistics.passenger_data = Statistics.passenger_data.append({'p_id': self.id,
+                                                                      'request_t': self.requestTime,
+                                                                      'trip_d': self.tripDistance,
+                                                                      'trip_t': self.tripDuration,
+                                                                      'VoT': self.VoT,
+                                                                      'fare': self.fare,
+                                                                      'prefer_HV': self.preferHV}, ignore_index=True)
 
     def __repr__(self):
         return 'Passenger_{}'.format(self.id)
 
+    # TODO: Optimise nearest time calls to reduce repetition?
     def min_wait_time(self, vehicles):
         nearest_time = float('inf')
         for vehicle in vehicles:
@@ -57,17 +70,21 @@ class Passenger:
         return nearest_time
 
     def choose_vehicle(self, HV_v, AV_v):
-        # Fare = Flag price + Unit price * Trip duration
-        fare_HV = Variables.HVf1 + Variables.HVf2 * self.tripDuration
-        fare_AV = Variables.AVf1 + Variables.AVf2 * self.tripDuration
+        # Fare = Unit price * Trip duration
+        fare_HV = Variables.HV_unitFare / 3600 * self.tripDuration
+        fare_AV = Variables.AV_unitFare / 3600 * self.tripDuration
 
         # TODO: When instantaneous demand > supply, give accurate ETA. Now capped ETA = 20 min, use search radius
-        # Generalised cost = Fare + VoT / 3600 * (Estimation ratio * Time to the nearest vacant vehicle)
-        GC_HV = fare_HV + self.VoT / 3600 * Variables.phiHV * min(self.min_wait_time(HV_v), 1200)
-        GC_AV = fare_AV + self.VoT / 3600 * Variables.phiAV * min(self.min_wait_time(AV_v), 1200)
+        # Generalised cost = Fare + VoT * (Estimation ratio * Time to the nearest vacant vehicle)
+        GC_HV = Parameters.HV_const + \
+                Parameters.HV_coef_fare * fare_HV + \
+                Parameters.HV_coef_time * self.VoT * Parameters.phiHV * min(self.min_wait_time(HV_v), 1200)
+        GC_AV = Parameters.AV_const + \
+                Parameters.AV_coef_fare * fare_AV + \
+                Parameters.AV_coef_time * self.VoT * Parameters.phiAV * min(self.min_wait_time(AV_v), 1200)
 
         # Logit choice based on GC (dis-utility) of vehicles
-        _c = np.random.choice(['HV', 'AV', 'others'], p=np.exp([-GC_HV, -GC_AV, -Variables.others_GC]) / sum(np.exp([-GC_HV, -GC_AV, -Variables.others_GC])))
+        _c = np.random.choice(['HV', 'AV', 'others'], p=np.exp([-GC_HV, -GC_AV, -Parameters.others_GC]) / sum(np.exp([-GC_HV, -GC_AV, -Parameters.others_GC])))
         if _c == 'HV':
             return True, fare_HV  # Prefer HV
         elif _c == 'AV':
@@ -82,8 +99,8 @@ class Passenger:
             elif ~self.preferHV:
                 del Passenger.p_AV[self.id]
 
-            # Record data ['p_id', 'expire_t']
-            Statistics.expiration_data.append([self.id, self.expiredTime])
+            # Record statistics
+            Statistics.expiration_data = Statistics.expiration_data.append({'p_id': self.id, 'expire_t': self.expiredTime}, ignore_index=True)
 
 
 class UpdatePhi(Event):
@@ -97,8 +114,8 @@ class UpdatePhi(Event):
         return 'UpdatePhi@t{}'.format(self.time)
 
     def trigger(self, nHV, nAV):
-        Variables.phiHV = compute_phi(len(Passenger.p_HV), nHV)
-        Variables.phiAV = compute_phi(len(Passenger.p_AV), nAV)
+        Parameters.phiHV = compute_phi(len(Passenger.p_HV), nHV)
+        Parameters.phiAV = compute_phi(len(Passenger.p_AV), nAV)
 
 
 class NewPassenger(Event):

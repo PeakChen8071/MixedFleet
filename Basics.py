@@ -5,7 +5,7 @@ import networkx as nx
 from scipy.stats import truncnorm
 
 from Configuration import configs
-from Map import G
+from Map import G, shortest_times
 
 
 eventQueue = []
@@ -70,7 +70,8 @@ def duration_between(from_loc, to_loc):
     if (from_loc.source is to_loc.source) and (from_loc.target is to_loc.target) and (from_loc.timeFromSource < to_loc.timeFromSource):
         return to_loc.timeFromSource - from_loc.timeFromSource
     else:
-        cost = nx.shortest_path_length(G, from_loc.target, to_loc.source, weight='duration')
+        # cost = nx.shortest_path_length(G, from_loc.target, to_loc.source, weight='duration')
+        cost = shortest_times.loc[from_loc.target, to_loc.source]
 
     if from_loc.type != 'Intersection':
         cost += from_loc.timeFromTarget
@@ -113,16 +114,18 @@ class Location:
 class Event:
     """ Event priorities, the triggering order at the same time
 
-        0 : NewHV, ActivateAVs/DeactivateAVs, UpdateStats
+        0 : NewHV, ActivateAVs/DeactivateAVs
         1 : TripCompletion
         2 : UpdatePhi
         3 : NewPassenger
-        4 : Assign
+        4 : UpdateStates
+        5 : Assign
+        6 : MPC
     """
 
     def __init__(self, time, priority):
-        self.time = time
-        self.priority = priority
+        self.time = int(time)
+        self.priority = int(priority)
         heapq.heappush(eventQueue, self)
 
     def __lt__(self, other):
