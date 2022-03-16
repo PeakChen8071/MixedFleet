@@ -255,6 +255,11 @@ class AV(Vehicle):
                                                                   'activation': False}, ignore_index=True)
 
 
+class EV(AV):
+    def __init__(self, time, loc):
+        super().__init__(time, loc)
+        self.SoC = 100
+
 
 class TripCompletion(Event):
     def __init__(self, time, vehicle, drop_off=False):
