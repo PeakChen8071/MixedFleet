@@ -8,8 +8,8 @@ path_time_file = configs['shortest_path_time_file']
 depot_file = configs['depot_file']
 charging_station_file = configs['charging_station_file']
 
-depots = pd.read_csv(depot_file, squeeze=True)
-chargingStations = pd.read_csv(charging_station_file, squeeze=True)
+depots = pd.read_csv(depot_file, squeeze=True).to_list()
+chargingStations = pd.read_csv(charging_station_file, squeeze=True).to_list()
 
 
 def read_passengers(fraction, hours):

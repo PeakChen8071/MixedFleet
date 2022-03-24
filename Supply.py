@@ -4,7 +4,7 @@ import pandas as pd
 from scipy.stats import truncnorm
 
 from Configuration import configs
-from Parser import depot_nodes, maximumWork
+from Parser import depots, maximumWork
 from Basics import Event, Location, random_loc, duration_between, Electricity
 from Control import Parameters, Variables, Statistics
 
@@ -14,12 +14,12 @@ activeAVs = {}
 inactiveAVs = {}
 
 # maximumWork = 24 * 3600  # Override maximum work hour limit
-depot_dict = {Location(d): None for d in depot_nodes}
+depot_dict = {Location(d): None for d in depots}
 
 
 def load_vehicles(neoclassical=0.5):
     # Instantiate the total AV fleet as inactive at depots (chosen randomly)
-    for d in np.random.choice(depot_nodes, configs['AV_fleet_size']):
+    for d in np.random.choice(depots, configs['AV_fleet_size']):
         AV(0, Location(d))
 
     # Activate random AVs as the initial fleet
