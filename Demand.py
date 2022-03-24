@@ -23,7 +23,8 @@ def load_passengers(fraction=1, hours=18):
     # Create passenger events
     for p in passenger_df.itertuples():
         NewPassenger(p.time, Location(p.o_source, p.o_target, p.o_loc), Location(p.d_source, p.d_target, p.d_loc),
-                     p.trip_distance, p.trip_duration, p.patience, p.VoT)
+                     p.trip_distance, p.trip_duration, p.patience, p.VoT,
+                     p.AV_const, p.AV_coef_fare, p.AV_coef_time, p.HV_const, p.HV_coef_fare, p.HV_coef_time)
 
     Statistics.simulationEndTime = lastPaxTime
     Statistics.lastPassengerTime = lastPaxTime
@@ -34,15 +35,25 @@ class Passenger:
     p_HV = {}
     p_AV = {}
 
-    def __init__(self, time, origin, destination, trip_distance, trip_duration, patience, VoT, HVs=None, AVs=None):
+    def __init__(self, time, origin, destination, trip_distance, trip_duration,
+                 patience, VoT, AV_const, AV_coef_fare, AV_coef_time,
+                 HV_const, HV_coef_fare, HV_coef_time, HVs=None, AVs=None):
         self.id = next(self._ids)
         self.requestTime = time
         self.origin = origin
         self.destination = destination
         self.tripDistance = trip_distance
         self.tripDuration = trip_duration
+
         self.expiredTime = time + patience
         self.VoT = VoT / 3600 # Value of time ($/sec)
+        self.AV_const = AV_const
+        self.AV_coef_fare = AV_coef_fare
+        self.AV_coef_time = AV_coef_time
+        self.HV_const = HV_const
+        self.HV_coef_fare = HV_coef_fare
+        self.HV_coef_time = HV_coef_time
+
         self.preferHV, self.fare = Passenger.choose_vehicle(self, HVs, AVs)
         if self.preferHV is not None:
             if self.preferHV:
@@ -62,7 +73,6 @@ class Passenger:
     def __repr__(self):
         return 'Passenger_{}'.format(self.id)
 
-    # TODO: Optimise nearest time calls to reduce repetition?
     def min_wait_time(self, vehicles):
         nearest_time = float('inf')
         for vehicle in vehicles:
@@ -74,17 +84,15 @@ class Passenger:
         fare_HV = Variables.HV_unitFare / 3600 * self.tripDuration
         fare_AV = Variables.AV_unitFare / 3600 * self.tripDuration
 
-        # TODO: When instantaneous demand > supply, give accurate ETA. Now capped ETA = 20 min, use search radius
         # Generalised cost = Fare + VoT * (Estimation ratio * Time to the nearest vacant vehicle)
-        GC_HV = Parameters.HV_const + \
-                Parameters.HV_coef_fare * fare_HV + \
-                Parameters.HV_coef_time * self.VoT * Parameters.phiHV * min(self.min_wait_time(HV_v), 1200)
-        GC_AV = Parameters.AV_const + \
-                Parameters.AV_coef_fare * fare_AV + \
-                Parameters.AV_coef_time * self.VoT * Parameters.phiAV * min(self.min_wait_time(AV_v), 1200)
+        GC_HV = self.HV_const + self.HV_coef_fare * fare_HV + self.HV_coef_time * \
+                self.VoT * Parameters.phiHV * min(self.min_wait_time(HV_v), configs['default_waiting_time'])
+        GC_AV = self.AV_const + self.AV_coef_fare * fare_AV + self.AV_coef_time * \
+                self.VoT * Parameters.phiAV * min(self.min_wait_time(AV_v), configs['default_waiting_time'])
 
         # Logit choice based on GC (dis-utility) of vehicles
-        _c = np.random.choice(['HV', 'AV', 'others'], p=np.exp([-GC_HV, -GC_AV, -Parameters.others_GC]) / sum(np.exp([-GC_HV, -GC_AV, -Parameters.others_GC])))
+        _c = np.random.choice(['HV', 'AV', 'others'],
+                              p=np.exp([-GC_HV, -GC_AV, -Parameters.others_GC]) / sum(np.exp([-GC_HV, -GC_AV, -Parameters.others_GC])))
         if _c == 'HV':
             return True, fare_HV  # Prefer HV
         elif _c == 'AV':

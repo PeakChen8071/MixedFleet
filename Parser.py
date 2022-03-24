@@ -2,15 +2,19 @@ import pandas as pd
 
 from Configuration import configs
 
-
+maximumWork = configs['maximum_work_duration']
 depot_nodes = configs['depot_nodes']
 map_file = configs['map_file']
 path_time_file = configs['shortest_path_time_file']
 
 
 def read_passengers(fraction, hours):
-    use_cols = ['tpep_pickup_datetime', 'o_source', 'o_target', 'o_loc', 'd_source', 'd_target', 'd_loc',
-                'trip_distance', 'trip_duration', 'patience', 'VoT']
+    use_cols = ['tpep_pickup_datetime', 'patience', 'VoT',
+                'o_source', 'o_target', 'o_loc',
+                'd_source', 'd_target', 'd_loc',
+                'trip_distance', 'trip_duration',
+                'AV_const', 'AV_coef_fare', 'AV_coef_time',
+                'HV_const', 'HV_coef_fare', 'HV_coef_time']
     passenger_df = pd.read_csv(configs["passenger_file"], usecols=use_cols)
     passenger_df['time'] = passenger_df['tpep_pickup_datetime'] - passenger_df['tpep_pickup_datetime'].min()
 

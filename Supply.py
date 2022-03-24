@@ -4,18 +4,16 @@ import pandas as pd
 from scipy.stats import truncnorm
 
 from Configuration import configs
-from Parser import depot_nodes
+from Parser import depot_nodes, maximumWork
 from Basics import Event, Location, random_loc, duration_between
 from Control import Parameters, Variables, Statistics
 
 
 HVs = {}
-maximumWork = configs['maximum_work_duration']
-# maximumWork = 24 * 3600
-
 activeAVs = {}
 inactiveAVs = {}
-cruiseAV = configs['AV_cruise_mode']
+
+# maximumWork = 24 * 3600  # Override maximum work hour limit
 depot_dict = {Location(d): None for d in depot_nodes}
 
 
@@ -53,6 +51,9 @@ def load_vehicles(neoclassical=0.5):
     for i in range(total):
         NewHV(shift_start[i], random_loc(), neoList[i], hourlyCost[i], targetIncome[i])
 
+    # TODO: remove after supply test
+    # pd.DataFrame({'start_times': shift_start, 'neoclassical': neoList}).to_csv('../Results/Simulation_Outputs/test_supply_data.csv')
+
 
 def load_simple_vehicles():
     # Instantiate the total AV fleet as inactive at depots (chosen randomly)
@@ -79,67 +80,14 @@ class Vehicle:
         self.time = time
         self.loc = loc
         self.is_HV = None
+        self.income = 0
+
         self.entranceTime = time
         self.assignedTime = 0
         self.occupiedTime = 0
-        self.income = 0
 
-        # Cruise-related attributes
         self.nextTrip = None  # TripCompletion object, checked at planned destination
         self.destination = None  # Planned cruise destination, updated if intercepted by trip assignment
-        # self.pathNodes = None  # Path from Basics.path_between(), including the upstream intersection as the first node
-        # self.pathTimes = None  # Timestamps to reach path nodes, the first timestamp is the current time
-
-    # NOTE: move cruise() method to HV/AV subclass methods if their behaviours are significantly different
-    # NOTE: End cruise at simulation end time to prevent infinite cruising
-    # def cruise(self, random_destination=True):
-    #     assert random_destination, 'Cannot recognise cruising plan.'
-
-    #     self.destination = Location(np.random.choice(G.nodes()))
-    #     pathNodes = [self.loc.source] + path_between(self.loc, self.destination)
-    #
-    #     timestamp = self.time + self.loc.timeFromTarget
-    #     pathTimes = [self.time, timestamp]
-    #     for i in range(1, len(pathNodes) - 1):
-    #         timestamp += G.edges[pathNodes[i], pathNodes[i + 1]]['duration']
-    #         pathTimes.append(timestamp)
-    #
-    #     if self.loc.type == 'Intersection':
-    #         pathNodes.pop()
-    #         pathTimes.pop()
-    #
-    #     self.pathNodes = pathNodes
-    #     self.pathTimes = pathTimes
-    #     return pathTimes[-1]
-
-    # update_loc() calculates the location of vehicle at time t, along its current cruising path.
-    # def update_loc(self, t):
-    #     if not self.pathTimes or t == self.pathTimes[0]:  # Vehicle is at the beginning
-    #         pass
-    #     elif t in self.pathTimes:  # Vehicle is at an intersection
-    #         self.time = t
-    #         self.loc = Location(self.pathNodes[self.pathTimes.index(t)])
-    #     else:  # Vehicle is on a road, between intersections
-    #         idx = bisect.bisect_left(self.pathTimes, t)
-    #         if idx == 1:  # current time is before reaching the first intersection
-    #             n0 = self.pathNodes[0]
-    #             n1 = self.pathNodes[1]
-    #
-    #             deltaT = t - self.time
-    #             self.loc.timeFromTarget -= deltaT
-    #             self.loc.timeFromSource += deltaT
-    #
-    #             deltaD = deltaT * G.edges[n0, n1]['distance'] / G.edges[n0, n1]['duration']
-    #             self.loc.locFromTarget -= deltaD
-    #             self.loc.locFromSource += deltaD
-    #         elif idx < len(self.pathTimes):
-    #             self.pathNodes = self.pathNodes[idx-1::]
-    #             self.pathTimes = self.pathTimes[idx-1::]
-    #
-    #             n0 = self.pathNodes[0]
-    #             n1 = self.pathNodes[1]
-    #             pos = (t - self.pathTimes[0]) * G.edges[n0, n1]['distance'] / G.edges[n0, n1]['duration']
-    #             self.loc = Location(n0, n1, pos)
 
 
 class HV(Vehicle):
@@ -168,8 +116,6 @@ class HV(Vehicle):
         return 'HV{}'.format(self.id)
 
     def decide_exit(self, exitTime, end=False):
-        Variables.exitDecisions += 1  # Update number of exit decision-making
-
         if exitTime - self.entranceTime >= maximumWork or end:
             # Update market count statistics
             Variables.HV_total -= 1
@@ -185,6 +131,8 @@ class HV(Vehicle):
             # if self.neoclassical and (Variables.HV_wage * Parameters.HV_utilisation >= self.hourlyCost):
             # if self.neoclassical and (Variables.HV_wage * Parameters.HV_occupancy >= self.hourlyCost):
             if self.neoclassical and ((self.hourlyCost - Variables.HV_wage * Parameters.HV_occupancy) / self.hourlyCost < np.random.rand() - 0.2):
+                Variables.exitDecisions += 1  # Update number of exit decision-making
+
                 # Neoclassical drivers have a chance to continue working based on the expected wage
                 HVs[self.id] = self
             elif ~self.neoclassical and (self.income < self.targetIncome):
@@ -215,8 +163,6 @@ class AV(Vehicle):
     def activate(self):
         assert self.id in inactiveAVs, 'Cannot activate an already active AV_{}'.format(self.id)
 
-        # if cruiseAV:
-        #     self.nextTrip = TripCompletion(self.time, self)
         activeAVs[self.id] = inactiveAVs.pop(self.id)
         Variables.AV_total += 1
 
@@ -253,12 +199,6 @@ class AV(Vehicle):
                                                                   'income': self.income,
                                                                   'time': self.time,
                                                                   'activation': False}, ignore_index=True)
-
-
-class EV(AV):
-    def __init__(self, time, loc):
-        super().__init__(time, loc)
-        self.SoC = 100
 
 
 class TripCompletion(Event):
@@ -299,16 +239,6 @@ class TripCompletion(Event):
                                                                               'v_id': self.vehicle.id,
                                                                               'trip_utilisation': newRatio}, ignore_index=True)
 
-        # if self.vehicle.nextTrip is self:
-        #     # Reaching the planned cruising destination without assignment
-        #     self.vehicle.time = self.time
-        #     self.vehicle.loc = self.vehicle.destination
-        #
-        #     # Cruise to the next destination if simulation has not ended
-        #     if self.time < self.endTime:
-        #         nextTime = self.vehicle.cruise()
-        #         self.vehicle.nextTrip = TripCompletion(nextTime, self.vehicle)
-
 
 class ActivateAVs(Event):
     def __init__(self, time, size):
@@ -340,7 +270,8 @@ class DeactivateAVs(Event):
                 v.time = self.time
                 v.deactivate()
 
-            DeactivateAVs(self.time+1, self.size-len(activeAVs))  # Try to deactivate the remaining AVs at next second
+            if self.time < Statistics.lastPassengerTime:
+                DeactivateAVs(self.time+1, self.size-len(activeAVs))  # Try to deactivate the remaining AVs at next second
         else:
             for v in np.random.choice(list(activeAVs.values()), self.size, False):
                 # v.update_loc(self.time)

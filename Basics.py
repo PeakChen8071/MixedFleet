@@ -32,6 +32,15 @@ def validate_passengers(passenger_file):
         # Random VoT ($/hr) ~ Normal(32, 3.2^2) bounded by [22, 38], rounded to int. (NYC HDM, 2018 household income)
         # VoT might be underestimated for Manhattan which is a relatively high-income area (Ulak, et al., 2020)
         df['VoT'] = truncnorm.rvs(a=-3.125, b=1.875, loc=32, scale=3.2, size=df.shape[0])
+        df['VoT'] = df['VoT'].round(2)  # Round to the nearest cents for readability
+
+        # Individual utility parameters are assumed to follow truncated normal distributions (professional knowledge)
+        df['AV_const'] = truncnorm.rvs(a=-1, b=1, loc=0, scale=0.5, size=df.shape[0])
+        df['HV_const'] = truncnorm.rvs(a=-1, b=1, loc=0, scale=0.5, size=df.shape[0])
+        df['AV_coef_fare'] = truncnorm.rvs(a=-1, b=1, loc=0.2, scale=0.2, size=df.shape[0])
+        df['HV_coef_fare'] = truncnorm.rvs(a=-1, b=1, loc=0.2, scale=0.2, size=df.shape[0])
+        df['AV_coef_time'] = truncnorm.rvs(a=-1, b=1, loc=0.05, scale=0.05, size=df.shape[0])
+        df['HV_coef_time'] = truncnorm.rvs(a=-1, b=1, loc=0.05, scale=0.05, size=df.shape[0])
 
         # Write back to passenger file with injected attributes
         df.sort_values('tpep_pickup_datetime').to_csv(configs["passenger_file"], index=False)

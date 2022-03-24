@@ -3,15 +3,15 @@
   "shortest_path_time_file": "Network_map/path_table.csv",
   "passenger_file": "DailyTrips_June1.csv",
   "data_output_path": "../Results/Simulation_Outputs",
+  "output_number": 0,
+
   "depot_nodes": [2512378850, 42429215, 42433554, 370924957, 42432818],
   "maximum_work_duration": 43200,
-  "output_number": 8,
+  "default_waiting_time": 1200,
 
-  "HV_fleet_size": 7500,
-  "AV_fleet_size": 5000,
-  "AV_initial_size": 2500,
-  "EV_fleet_size": 5000,
-  "EV_initial_size": 2500,
+  "HV_fleet_size": 650,
+  "AV_fleet_size": 3000,
+  "AV_initial_size": 150,
   "match_interval": 10,
 
   "MPC_start_hour": 4,

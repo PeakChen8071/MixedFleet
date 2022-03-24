@@ -38,7 +38,6 @@ def write_results(path, number):
     Statistics.control_data.to_csv('{}/sim{}_control_data.csv'.format(path, number))
     Statistics.objective_data.to_csv('{}/sim{}_objective_data.csv'.format(path, number))
 
-    pd.DataFrame(Variables.histSupply).to_csv('{}/sim{}_supply_data.csv'.format(path, number))
     pd.DataFrame(Variables.histExits).to_csv('{}/sim{}_exit_data.csv'.format(path, number))
 
 
@@ -54,7 +53,7 @@ class Statistics:
     utilisation_data = pd.DataFrame(columns=['time', 'v_id', 'trip_utilisation'])
     prediction_data = pd.DataFrame(columns=['time', 'AV_pw', 'AV_nv', 'AV_na', 'AV_no', 'AV_pickup', 'AV_dropoff',
                                             'HV_supply', 'HV_pw', 'HV_nv', 'HV_na', 'HV_no', 'HV_pickup', 'HV_dropoff'])
-    control_data = pd.DataFrame(columns=['time', 'AV_unitFare', 'HV_unitFare'])
+    control_data = pd.DataFrame(columns=['time', 'AV_unitFare', 'HV_unitFare', 'AV_supply'])
     objective_data = pd.DataFrame(columns=['time', 'objective'])
 
     # Simulation time markers
@@ -95,12 +94,12 @@ class Parameters:
     # Passenger Logit choice model
     AV_const = 0
     HV_const = 0
-    AV_coef_fare = 0.1
-    HV_coef_fare = 0.1
+    AV_coef_fare = 0.2
+    HV_coef_fare = 0.2
     AV_coef_time = 0.05
     HV_coef_time = 0.05
     mean_VoT = 32 / 3600  # Assume passenger VoT is represented by the mean
-    others_GC = 2  # scaled utility of alternative mode choices
+    others_GC = 3  # scaled utility of alternative mode choices
 
     # AV cost
     AV_vacant_cost = 0.001  # Operational cost per veh·sec
@@ -189,9 +188,9 @@ def mpc_mixed_fleet(N, Nc, tau_c, tau_k):
         if control == 'AV_supply':
             return -Variables.AV_nv, configs['AV_fleet_size'] - Variables.AV_total
         elif control == 'AV_unitFare':
-            return 0, 360
+            return 0, 150
         elif control == 'HV_unitFare':
-            return 0, 360
+            return 0, 150
 
     # Control variables
     m.u = pyo.Var(m.controls, m.k, bounds=control_bounds)
@@ -364,7 +363,7 @@ class MPC(Event):
             MPC_model.u['HV_unitFare', k] = Variables.HV_unitFare
             MPC_model.u['AV_supply', k] = 0
 
-        MPC_model.u.fix()  # TODO: Fix/Unfix control values here
+        # MPC_model.u.fix()  # TODO: Fix/Unfix control values here
 
         # Solve MPC optimisation
         solver = pyo.SolverFactory('ipopt')

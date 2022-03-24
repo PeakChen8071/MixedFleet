@@ -4,7 +4,7 @@ import heapq
 from Configuration import configs
 from Basics import eventQueue, validate_passengers
 from Control import Statistics, Variables, write_results, MPC
-from Supply import load_vehicles, HVs, activeAVs, DeactivateAVs, TripCompletion
+from Supply import load_vehicles, load_simple_vehicles, HVs, activeAVs, DeactivateAVs, TripCompletion
 from Demand import load_passengers, NewPassenger, UpdatePhi, Passenger
 from Management import schedule_states, schedule_assignment, schedule_MPC, manage_AVs
 
@@ -13,13 +13,13 @@ _t0 = time.time()
 
 # Load passengers into Events
 validate_passengers(configs['passenger_file'])
-load_passengers()
+load_passengers(0.1)
 print('Last passenger spawns at {} sec.'.format(Statistics.lastPassengerTime))
 
 # Load vehicles into Events
 # - HVs are randomly located, join the market based on their (1) neoclassical (2) income-targeting behaviours
 # - AVs are inactive at pre-defined depots, with an active initial fleet at 04:00
-load_vehicles(neoclassical=0.5)
+load_vehicles(neoclassical=0)
 # load_simple_vehicles()
 
 # Schedule assignments into Events

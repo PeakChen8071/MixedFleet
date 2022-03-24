@@ -70,7 +70,7 @@ def bipartite_match(vacant_v, waiting_p):
         for p in waiting_p:
             trip_tt.loc[v, p] = duration_between(v.loc, p.origin)
 
-    results = [(v, p, trip_tt.loc[v, p]) for v, p in One2One_Matching(trip_tt.rdiv(1, fill_value=0)).items()]
+    results = [(v, p, trip_tt.loc[v, p]) for v, p in One2One_Matching(trip_tt.replace(0, 1).rdiv(1)).items()]
 
     return results  # List of tuples of assigned (vehicle, passenger, trip_tt)
 
