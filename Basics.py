@@ -139,3 +139,10 @@ class Event:
 
     def __lt__(self, other):
         return (self.time, self.priority) < (other.time, other.priority)
+
+
+class Electricity:
+    max_SoC = 50  # unit: kWh
+    min_SoC = 10  # unit: kWh
+    charge_rate = 7  # unit: kW
+    consumption_rate = 5  # unit: kW

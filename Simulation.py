@@ -19,13 +19,13 @@ print('Last passenger spawns at {} sec.'.format(Statistics.lastPassengerTime))
 # Load vehicles into Events
 # - HVs are randomly located, join the market based on their (1) neoclassical (2) income-targeting behaviours
 # - AVs are inactive at pre-defined depots, with an active initial fleet at 04:00
-load_vehicles(neoclassical=0)
-# load_simple_vehicles()
+# load_vehicles(neoclassical=0)
+load_simple_vehicles()
 
 # Schedule assignments into Events
 schedule_assignment(Statistics.lastPassengerTime)
 schedule_states(Statistics.lastPassengerTime)
-schedule_MPC(Statistics.lastPassengerTime)
+# schedule_MPC(Statistics.lastPassengerTime)
 
 while len(eventQueue) != 0:
     event = heapq.heappop(eventQueue)

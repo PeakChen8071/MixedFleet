@@ -3,9 +3,13 @@ import pandas as pd
 from Configuration import configs
 
 maximumWork = configs['maximum_work_duration']
-depot_nodes = configs['depot_nodes']
 map_file = configs['map_file']
 path_time_file = configs['shortest_path_time_file']
+depot_file = configs['depot_file']
+charging_station_file = configs['charging_station_file']
+
+depots = pd.read_csv(depot_file, squeeze=True)
+chargingStations = pd.read_csv(charging_station_file, squeeze=True)
 
 
 def read_passengers(fraction, hours):

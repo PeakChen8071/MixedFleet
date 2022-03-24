@@ -5,7 +5,7 @@ from scipy.stats import truncnorm
 
 from Configuration import configs
 from Parser import depot_nodes, maximumWork
-from Basics import Event, Location, random_loc, duration_between
+from Basics import Event, Location, random_loc, duration_between, Electricity
 from Control import Parameters, Variables, Statistics
 
 
@@ -56,20 +56,15 @@ def load_vehicles(neoclassical=0.5):
 
 
 def load_simple_vehicles():
-    # Instantiate the total AV fleet as inactive at depots (chosen randomly)
-    for d in np.random.choice(depot_nodes, configs['AV_fleet_size']):
-        AV(0, Location(d))
-
-    # Activate random AVs as the initial fleet
-    ActivateAVs(0, configs['AV_initial_size'])
-
     shift_start = [int(i) for i in np.linspace(0, 3600, configs['HV_fleet_size'])]
+    initialSoC = np.random.uniform(0.9, 1.0, configs['HV_fleet_size'])
     bins = [i for i in range(0, Statistics.lastPassengerTime, configs['MPC_prediction_interval'])]
     Variables.histSupply = pd.Series(shift_start).groupby(pd.cut(pd.Series(shift_start), bins)).count()
 
     # Activate all HV fleet as
     for i in range(configs['HV_fleet_size']):
-        NewHV(shift_start[i], random_loc(), False, 0, 10000)
+        # NewHV(shift_start[i], random_loc(), False, 0, 10000)
+        NewEV(shift_start[i], random_loc(), False, 0, 10000, initialSoC[i])
 
 
 class Vehicle:
@@ -279,6 +274,15 @@ class DeactivateAVs(Event):
                 v.deactivate()
 
 
+class EV(HV):
+    def __init__(self, time, loc, neo, hourlyCost, targetIncome, initialSoC):
+        super().__init__(time, loc, neo, hourlyCost, targetIncome)
+        self.SoC = initialSoC * Electricity.max_SoC
+
+    def __repr__(self):
+        return 'EV{}'.format(self.id)
+
+
 class NewHV(Event):
 
     def __init__(self, time, loc, neo, hourlyCost, targetIncome):
@@ -299,6 +303,31 @@ class NewHV(Event):
 
         if ~self.neo or (expectedWage >= self.hourlyCost):
             HV(self.time, self.loc, self.neo, self.hourlyCost, self.targetIncome)
+        elif self.neo and (self.time + 600 < Statistics.lastPassengerTime) and \
+                ((self.hourlyCost - expectedWage) / self.hourlyCost < np.random.rand() - 0.2):
+            # Neoclassical drivers may try to join the market again in 5 minutes (before last passenger)
+            NewHV(self.time + 300, self.loc, self.neo, self.hourlyCost, self.targetIncome)
+            Variables.histSupply[int((self.time + 300) / 10)] += 1
+
+
+class NewEV(Event):
+
+    def __init__(self, time, loc, neo, hourlyCost, targetIncome, initialSoC):
+        super().__init__(time, priority=0)
+        self.loc = loc
+        self.neo = neo
+        self.hourlyCost = hourlyCost
+        self.targetIncome = targetIncome
+        self.initialSoC = initialSoC
+
+    def __repr__(self):
+        return 'NewEV@t{}'.format(self.time)
+
+    def trigger(self):
+        expectedWage = Variables.HV_wage * Parameters.HV_occupancy
+
+        if ~self.neo or (expectedWage >= self.hourlyCost):
+            EV(self.time, self.loc, self.neo, self.hourlyCost, self.targetIncome, self.initialSoC)
         elif self.neo and (self.time + 600 < Statistics.lastPassengerTime) and \
                 ((self.hourlyCost - expectedWage) / self.hourlyCost < np.random.rand() - 0.2):
             # Neoclassical drivers may try to join the market again in 5 minutes (before last passenger)

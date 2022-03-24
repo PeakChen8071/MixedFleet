@@ -29,6 +29,15 @@ def plot_depots():
     plt.show()
 
 
+def plot_stations():
+    fig, ax = plt.subplots(figsize=(8, 8), dpi=600, tight_layout=True)
+    ax.set_aspect('equal')
+    nx.draw(G, nx.get_node_attributes(G, 'pos'), arrows=False, node_size=0, edge_color='grey')
+    nx.draw_networkx_nodes(G, nx.get_node_attributes(G, 'pos'), depot_nodes,
+                           node_size=5, node_shape='^', node_color='b', label='Depots')
+    plt.show()
+
+
 # TODO: Visualise results on map
 # H = graph.copy()
 # for n in H.nodes():

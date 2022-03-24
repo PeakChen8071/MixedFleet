@@ -110,8 +110,8 @@ class Parameters:
     HV_penalty = 1  # $ per cancellation
 
     # Order cancellation rate estimation
-    HV_beta = 4
-    AV_beta = 4
+    HV_beta = 6
+    AV_beta = 5
 
     # Time-varying parameters
     HV_utilisation = 0.6

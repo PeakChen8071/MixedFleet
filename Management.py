@@ -8,36 +8,6 @@ from Demand import Passenger
 from Supply import HVs, activeAVs, TripCompletion, ActivateAVs, DeactivateAVs
 
 
-def One2One_Matching(Utility):
-    # Define LP problem
-    model = pulp.LpProblem("Ride_Matching_Problems", pulp.LpMaximize)
-
-    # Initialise binary variables to represent pairing
-    X = pulp.LpVariable.dicts("X", ((_v, _p) for _v in Utility.index for _p in Utility.columns), lowBound=0, upBound=1, cat='Integer')
-
-    # Objective as the sum of potential costs
-    model += (pulp.lpSum([Utility.loc[_v, _p] * X[(_v, _p)] for _v in Utility.index for _p in Utility.columns]))
-
-    # Constraint 1: row sum to 1, one vacant vehicle only matches with one waiting passenger request
-    for _v in Utility.index:
-        model += pulp.lpSum([X[(_v, _p)] for _p in Utility.columns]) <= 1
-
-    for _p in Utility.columns:
-        model += pulp.lpSum([X[(_v, _p)] for _v in Utility.index]) <= 1
-
-    solver = pulp.GLPK_CMD(msg=False)  # Suppress output
-    model.solve(solver)  # Solve LP
-
-    result = {}
-    for var in X:
-        var_value = X[var].varValue
-        if var_value != 0:
-            # Write paired matches to result dict
-            result[var[0]] = var[1]
-
-    return result
-
-
 # Bipartite matching which minimises the total dispatch trip duration
 # def bipartite_match(vacant_v, waiting_p):
 #     if (not vacant_v) | (not waiting_p):
@@ -70,9 +40,37 @@ def bipartite_match(vacant_v, waiting_p):
         for p in waiting_p:
             trip_tt.loc[v, p] = duration_between(v.loc, p.origin)
 
-    results = [(v, p, trip_tt.loc[v, p]) for v, p in One2One_Matching(trip_tt.replace(0, 1).rdiv(1)).items()]
+    Utility = trip_tt.replace(0, 1).rdiv(1)
 
-    return results  # List of tuples of assigned (vehicle, passenger, trip_tt)
+    # Define LP problem
+    model = pulp.LpProblem("Ride_Matching_Problems", pulp.LpMaximize)
+
+    # Initialise binary variables to represent pairing
+    X = pulp.LpVariable.dicts("X", ((_v, _p) for _v in Utility.index for _p in Utility.columns), lowBound=0, upBound=1, cat='Integer')
+
+    # Objective as the sum of potential costs
+    model += (pulp.lpSum([Utility.loc[_v, _p] * X[(_v, _p)] for _v in Utility.index for _p in Utility.columns]))
+
+    # Constraint 1: row sum to 1, one vacant vehicle only matches with one waiting passenger request
+    for _v in Utility.index:
+        model += pulp.lpSum([X[(_v, _p)] for _p in Utility.columns]) <= 1
+
+    for _p in Utility.columns:
+        model += pulp.lpSum([X[(_v, _p)] for _v in Utility.index]) <= 1
+
+    solver = pulp.GLPK_CMD(msg=False)  # Suppress output
+    model.solve(solver)  # Solve LP
+
+    result = {}
+    for var in X:
+        var_value = X[var].varValue
+        if var_value != 0:
+            # Write paired matches to result dict
+            result[var[0]] = var[1]
+
+    matching = [(v, p, trip_tt.loc[v, p]) for v, p in result.items()]
+
+    return matching  # List of tuples of assigned (vehicle, passenger, trip_tt)
 
 
 def compute_assignment(t):
@@ -114,7 +112,7 @@ class Assign(Event):
                     del Passenger.p_HV[p.id]
 
                     # Update HV meeting time expectation
-                    if self.time > 3600:
+                    if self.time > 1800:  # TODO: determine warm-up time for trip time estimation
                         Variables.HV_ta = (Variables.HV_ta * Variables.HV_trips + m[2]) / (Variables.HV_trips + 1)
                         Variables.HV_to = (Variables.HV_to * Variables.HV_trips + p.tripDuration) / (Variables.HV_trips + 1)
 
