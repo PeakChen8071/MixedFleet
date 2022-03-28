@@ -13,7 +13,7 @@ _t0 = time.time()
 
 # Load passengers into Events
 validate_passengers(configs['passenger_file'])
-load_passengers(0.1)
+load_passengers()
 print('Last passenger spawns at {} sec.'.format(Statistics.lastPassengerTime))
 
 # Load vehicles into Events
