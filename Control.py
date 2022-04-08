@@ -49,7 +49,7 @@ class Statistics:
     vehicle_data = pd.DataFrame(columns=['v_id', 'is_HV', 'neoclassical', 'income', 'time', 'activation'])
     passenger_data = pd.DataFrame(columns=['p_id', 'request_t', 'trip_d', 'trip_t', 'VoT', 'fare', 'prefer_HV'])
     expiration_data = pd.DataFrame(columns=['p_id', 'expire_t'])
-    assignment_data = pd.DataFrame(columns=['v_id', 'p_id', 'is_HV', 'dispatch_t', 'meeting_t', 'delivery_t'])
+    assignment_data = pd.DataFrame(columns=['v_id', 'p_id', 'is_HV', 'dispatch_t', 'meeting_t', 'delivery_t', 'profit', 'SoC'])
     utilisation_data = pd.DataFrame(columns=['time', 'v_id', 'trip_utilisation'])
     prediction_data = pd.DataFrame(columns=['time', 'AV_pw', 'AV_nv', 'AV_na', 'AV_no', 'AV_pickup', 'AV_dropoff',
                                             'HV_supply', 'HV_pw', 'HV_nv', 'HV_na', 'HV_no', 'HV_pickup', 'HV_dropoff'])
@@ -152,7 +152,7 @@ class Variables:
     AV_to = 600
 
     # Fixed driver wage
-    HV_wage = 40  # Income = Unit wage (per hour) / 3600 * Trip duration (sec)
+    HV_wage = 21  # Income = Unit wage (per hour) / 3600 * Trip duration (sec)
 
     # Passenger fare control inputs
     AV_unitFare = 48  # Default AV unit fare, $0.8 / min = $48 / hr

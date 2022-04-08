@@ -54,7 +54,12 @@ class Passenger:
         self.HV_coef_fare = HV_coef_fare
         self.HV_coef_time = HV_coef_time
 
-        self.preferHV, self.fare = Passenger.choose_vehicle(self, HVs, AVs)
+        # There is no AVs in the EV paper
+        self.preferHV = True
+        Passenger.p_HV[self.id] = self
+        self.fare = Variables.HV_unitFare / 3600 * self.tripDuration
+
+        # self.preferHV, self.fare = Passenger.choose_vehicle(self, HVs, AVs)
         if self.preferHV is not None:
             if self.preferHV:
                 Passenger.p_HV[self.id] = self

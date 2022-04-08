@@ -2,10 +2,47 @@ import pandas as pd
 import pulp
 
 from Configuration import configs
-from Basics import Event, duration_between
+from Map import chargingStations, nearestStations
+from Basics import Event, duration_between, Electricity, Location
 from Control import Parameters, Variables, Statistics, MPC
 from Demand import Passenger
 from Supply import HVs, activeAVs, TripCompletion, ActivateAVs, DeactivateAVs
+
+
+chargingStations = [Location(cs) for cs in chargingStations]
+
+
+def One2One_Matching(Utility, constr_list):
+    # Define LP problem
+    model = pulp.LpProblem("Ride_Matching_Problems", pulp.LpMaximize)
+
+    # Initialise binary variables to represent pairing
+    X = pulp.LpVariable.dicts("X", ((_v, _p) for _v in Utility.index for _p in Utility.columns), lowBound=0, upBound=1, cat='Integer')
+    for O, D in constr_list:
+        X[O, D].setInitialValue(0)
+        X[O, D].fixValue()
+
+    # Objective as the sum of potential costs
+    model += (pulp.lpSum([Utility.loc[_v, _p] * X[(_v, _p)] for _v in Utility.index for _p in Utility.columns]))
+
+    # Constraint 1: row sum to 1, one vacant vehicle only matches with one waiting passenger request
+    for _v in Utility.index:
+        model += pulp.lpSum([X[(_v, _p)] for _p in Utility.columns]) <= 1
+
+    for _p in Utility.columns:
+        model += pulp.lpSum([X[(_v, _p)] for _v in Utility.index]) <= 1
+
+    solver = pulp.GLPK_CMD(msg=False)  # Suppress output
+    model.solve(solver)  # Solve LP
+
+    result = {}
+    for var in X:
+        var_value = X[var].varValue
+        if var_value != 0:
+            # Write paired matches to result dict
+            result[var[0]] = var[1]
+
+    return result
 
 
 # Bipartite matching which minimises the total dispatch trip duration
@@ -40,51 +77,55 @@ def bipartite_match(vacant_v, waiting_p):
         for p in waiting_p:
             trip_tt.loc[v, p] = duration_between(v.loc, p.origin)
 
-    Utility = trip_tt.replace(0, 1).rdiv(1)
+    results = [(v, p, trip_tt.loc[v, p]) for v, p in One2One_Matching(-trip_tt, []).items()]
 
-    # Define LP problem
-    model = pulp.LpProblem("Ride_Matching_Problems", pulp.LpMaximize)
+    return results  # List of tuples of assigned (vehicle, passenger, trip_tt)
 
-    # Initialise binary variables to represent pairing
-    X = pulp.LpVariable.dicts("X", ((_v, _p) for _v in Utility.index for _p in Utility.columns), lowBound=0, upBound=1, cat='Integer')
 
-    # Objective as the sum of potential costs
-    model += (pulp.lpSum([Utility.loc[_v, _p] * X[(_v, _p)] for _v in Utility.index for _p in Utility.columns]))
+def EV_match(vacant_v, waiting_p):
+    if not vacant_v:
+        return None  # No matching if no vehicle is available
 
-    # Constraint 1: row sum to 1, one vacant vehicle only matches with one waiting passenger request
-    for _v in Utility.index:
-        model += pulp.lpSum([X[(_v, _p)] for _p in Utility.columns]) <= 1
+    # trip_tt = pd.DataFrame(index=vacant_v, columns=list(waiting_p) + chargingStations)
+    # profit_matrix = pd.DataFrame(index=vacant_v, columns=list(waiting_p) + chargingStations)
+    trip_tt = pd.DataFrame(index=vacant_v, columns=list(waiting_p))
+    profit_matrix = pd.DataFrame(index=vacant_v, columns=list(waiting_p))
+    constraints = []
+    for v in vacant_v:
+        for p in waiting_p:
+            _tt = duration_between(v.loc, p.origin)
+            trip_tt.loc[v, p] = _tt
 
-    for _p in Utility.columns:
-        model += pulp.lpSum([X[(_v, _p)] for _v in Utility.index]) <= 1
+            if _tt > v.SoC / Electricity.consumption_rate * 3600:
+                constraints.append((v, p))
+            else:
+                profit_matrix.loc[v, p] = p.fare - p.tripDuration / 3600 * Variables.HV_wage - p.VoT * _tt \
+                                          - (p.tripDuration + _tt) / 3600 * Electricity.consumption_rate * Electricity.electricity_cost
+        for cs in chargingStations:
+            _tt = duration_between(v.loc, cs)
+            trip_tt.loc[v, cs] = _tt
 
-    solver = pulp.GLPK_CMD(msg=False)  # Suppress output
-    model.solve(solver)  # Solve LP
+            if _tt > v.SoC / Electricity.consumption_rate * 3600:
+                constraints.append((v, cs))
+            else:
+                profit_matrix.loc[v, cs] = Electricity.charging_benefit * (Electricity.max_SoC - v.SoC) \
+                                           - 0.5 * Electricity.charging_cost * (Electricity.max_SoC - v.SoC) / Electricity.charge_rate \
+                                           - duration_between(v.loc, cs) * Electricity.consumption_rate / 3600 * Electricity.electricity_cost
 
-    result = {}
-    for var in X:
-        var_value = X[var].varValue
-        if var_value != 0:
-            # Write paired matches to result dict
-            result[var[0]] = var[1]
+    results = [(v, p, trip_tt.loc[v, p]) for v, p in One2One_Matching(profit_matrix, constraints).items()]
 
-    matching = [(v, p, trip_tt.loc[v, p]) for v, p in result.items()]
-
-    return matching  # List of tuples of assigned (vehicle, passenger, trip_tt)
+    return results  # List of tuples of assigned (vehicle, passenger, trip_tt)
 
 
 def compute_assignment(t):
-    for v in (HVs | activeAVs).values():
-        # v.update_loc(t)  # Update vehicle location
+    for v in HVs.values():
         v.time = t  # Update vehicle time
 
-    for p in (Passenger.p_HV | Passenger.p_AV).values():
+    for p in Passenger.p_HV.copy().values():
         p.check_expiration(t)  # Remove expired passengers
 
     # Compute and return minimum weighting full bipartite matching
-    HV_match = bipartite_match(HVs.values(), Passenger.p_HV.values())
-    AV_match = bipartite_match(activeAVs.values(), Passenger.p_AV.values())
-    return HV_match, AV_match
+    return EV_match(HVs.values(), Passenger.p_HV.values())
 
 
 class Assign(Event):
@@ -99,20 +140,26 @@ class Assign(Event):
 
     def transport(self, match_results):
         if match_results:
+            print(match_results)
             for m in match_results:
                 v = m[0]  # Assigned vehicle
-                p = m[1]  # Assigned passenger
-                meeting_t = self.time + m[2]  # Timestamp of meeting
-                delivery_t = meeting_t + p.tripDuration  # Timestamp of drop-off
-                v.occupiedTime = p.tripDuration  # Update vehicle occupied duration
+                p = m[1]  # Assigned passenger or station
 
-                # Vehicle and passenger are assigned and removed from available dictionaries
-                if v.is_HV:
-                    del HVs[v.id]
+                v.SoC -= m[2] / 3600 * Electricity.consumption_rate  # SoC consumed to meet
+                meeting_t = self.time + m[2]  # Timestamp of meeting
+
+                # Remove vehicle from available dictionary
+                del HVs[v.id]
+
+                if p in Passenger.p_HV.values():
+                    delivery_t = meeting_t + p.tripDuration  # Timestamp of drop-off
+                    v.occupiedTime = p.tripDuration  # Update vehicle occupied duration
+
+                    # Remove passenger from waiting list
                     del Passenger.p_HV[p.id]
 
                     # Update HV meeting time expectation
-                    if self.time > 1800:  # TODO: determine warm-up time for trip time estimation
+                    if self.time > 3600:
                         Variables.HV_ta = (Variables.HV_ta * Variables.HV_trips + m[2]) / (Variables.HV_trips + 1)
                         Variables.HV_to = (Variables.HV_to * Variables.HV_trips + p.tripDuration) / (Variables.HV_trips + 1)
 
@@ -130,58 +177,68 @@ class Assign(Event):
                     else:
                         Statistics.HV_dropoff_counter[delivery_t] = 1
 
+                    # Vehicle delivers passenger to passenger destination
+                    v.time = delivery_t
+                    v.loc = p.destination
+
+                    # Their next trip planning occurs after passenger drop-off
+                    v.nextTrip = TripCompletion(delivery_t, v, drop_off=True)
+
+                    # Update system statistics
+                    if meeting_t < Statistics.simulationEndTime:
+                        UpdateOccupied(meeting_t, v.is_HV, 1)
+                    if delivery_t < Statistics.simulationEndTime:
+                        UpdateOccupied(delivery_t, v.is_HV, -1)
+
+                    # Record trip statistics
+                    Statistics.assignment_data = Statistics.assignment_data.append({'v_id': v.id,
+                                                                                    'p_id': p.id,
+                                                                                    'is_HV': v.is_HV,
+                                                                                    'dispatch_t': self.time,
+                                                                                    'meeting_t': meeting_t,
+                                                                                    'delivery_t': delivery_t,
+                                                                                    'profit': p.fare,
+                                                                                    'SoC': v.SoC},
+                                                                                   ignore_index=True)
+                elif p in chargingStations:
+                    charging_t = int((Electricity.max_SoC - v.SoC) / Electricity.charge_rate * 3600)
+                    delivery_t = meeting_t + charging_t
+                    e_payment = round(charging_t / 3600 * Electricity.charging_cost)
+                    v.SoC = Electricity.max_SoC  # Recharge to full SoC
+                    v.loc = p
+
+                    # Their next trip planning occurs after recharging
+                    v.nextTrip = TripCompletion(delivery_t, v, drop_off=False)
+
+                    # Record trip statistics
+                    Statistics.assignment_data = Statistics.assignment_data.append({'v_id': v.id,
+                                                                                    'p_id': p.source,
+                                                                                    'is_HV': v.is_HV,
+                                                                                    'dispatch_t': self.time,
+                                                                                    'meeting_t': meeting_t,
+                                                                                    'delivery_t': delivery_t,
+                                                                                    'profit': e_payment,
+                                                                                    'SoC': v.SoC},
+                                                                                   ignore_index=True)
                 else:
-                    del activeAVs[v.id]
-                    del Passenger.p_AV[p.id]
-
-                    if self.time > 3600:
-                        Variables.AV_ta = (Variables.AV_ta * Variables.AV_trips + m[2]) / (Variables.AV_trips + 1)
-                        Variables.AV_to = (Variables.AV_to * Variables.AV_trips + p.tripDuration) / (Variables.AV_trips + 1)
-
-                    if meeting_t in Statistics.AV_pickup_counter:
-                        Statistics.AV_pickup_counter[meeting_t] += 1
-                    else:
-                        Statistics.AV_pickup_counter[meeting_t] = 1
-
-                    if delivery_t in Statistics.AV_dropoff_counter:
-                        Statistics.AV_dropoff_counter[delivery_t] += 1
-                    else:
-                        Statistics.AV_dropoff_counter[delivery_t] = 1
-
-                # Vehicle delivers passenger to passenger destination
-                v.time = delivery_t
-                v.loc = p.destination
-
-                # Their next trip planning occurs after delivery trip completion
-                v.nextTrip = TripCompletion(delivery_t, v, drop_off=True)
-
-                # Update system statistics
-                if meeting_t < Statistics.simulationEndTime:
-                    UpdateOccupied(meeting_t, v.is_HV, 1)
-                if delivery_t < Statistics.simulationEndTime:
-                    UpdateOccupied(delivery_t, v.is_HV, -1)
-
-                # Record trip statistics
-                Statistics.assignment_data = Statistics.assignment_data.append({'v_id': v.id,
-                                                                                'p_id': p.id,
-                                                                                'is_HV': v.is_HV,
-                                                                                'dispatch_t': self.time,
-                                                                                'meeting_t': meeting_t,
-                                                                                'delivery_t': delivery_t},
-                                                                               ignore_index=True)
+                    raise ValueError('Vehicle is not matched to a passenger or charging station')
 
     def trigger(self, end=False):
         if not end:
-            HV_match, AV_match = compute_assignment(self.time)
-            self.transport(HV_match)
-            self.transport(AV_match)
-
+            HV_recharge = []
             # Exit decision-making at matching intervals for vacant HVs
             for k in HVs.copy().keys():
-                HVs.pop(k).decide_exit(self.time)
+                if HVs[k].SoC < Electricity.min_SoC:
+                    HV_recharge.append((HVs[k], Location(nearestStations[HVs[k].loc.target, 'cs']), nearestStations[HVs[k].loc.target, 'tt']))
+                else:
+                    HVs.pop(k).decide_exit(self.time)
+                    Variables.histExits.append(Variables.exitDecisions)
+                    Variables.exitDecisions = 0
 
-            Variables.histExits.append(Variables.exitDecisions)
-            Variables.exitDecisions = 0
+            HV_match = compute_assignment(self.time)
+            if HV_recharge:
+                HV_match += HV_recharge
+            self.transport(HV_match)
 
 
 class UpdateStates(Event):

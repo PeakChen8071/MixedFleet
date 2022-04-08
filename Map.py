@@ -5,7 +5,7 @@ import momepy
 import networkx as nx
 import matplotlib.pyplot as plt
 
-from Parser import map_file, path_time_file, depot_nodes
+from Parser import map_file, path_time_file, depots, chargingStations, nearestStations
 
 
 # Construct Networkx directed graph based on parsed edge list
@@ -24,7 +24,7 @@ def plot_depots():
     fig, ax = plt.subplots(figsize=(8, 8), dpi=600, tight_layout=True)
     ax.set_aspect('equal')
     nx.draw(G, nx.get_node_attributes(G, 'pos'), arrows=False, node_size=0, edge_color='grey')
-    nx.draw_networkx_nodes(G, nx.get_node_attributes(G, 'pos'), depot_nodes,
+    nx.draw_networkx_nodes(G, nx.get_node_attributes(G, 'pos'), depots,
                            node_size=5, node_shape='o', node_color='r', label='Depots')
     plt.show()
 
@@ -33,8 +33,8 @@ def plot_stations():
     fig, ax = plt.subplots(figsize=(8, 8), dpi=600, tight_layout=True)
     ax.set_aspect('equal')
     nx.draw(G, nx.get_node_attributes(G, 'pos'), arrows=False, node_size=0, edge_color='grey')
-    nx.draw_networkx_nodes(G, nx.get_node_attributes(G, 'pos'), depot_nodes,
-                           node_size=5, node_shape='^', node_color='b', label='Depots')
+    nx.draw_networkx_nodes(G, nx.get_node_attributes(G, 'pos'), chargingStations,
+                           node_size=5, node_shape='^', node_color='b', label='Stations')
     plt.show()
 
 

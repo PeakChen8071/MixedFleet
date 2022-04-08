@@ -142,7 +142,10 @@ class Event:
 
 
 class Electricity:
-    max_SoC = 50  # unit: kWh
-    min_SoC = 10  # unit: kWh
-    charge_rate = 7  # unit: kW
-    consumption_rate = 5  # unit: kW
+    max_SoC = 40  # unit: kWh
+    min_SoC = 8  # unit: kWh
+    charge_rate = 6  # unit: kW
+    consumption_rate = 6  # unit: kW
+    electricity_cost = 0.2  # unit: $/kWh
+    charging_benefit = 0.3  # unit: $/kWh
+    charging_cost = 1.5  # unit: $/h

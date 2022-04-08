@@ -46,7 +46,6 @@ while len(eventQueue) != 0:
         if len(HVs) != 0:
             for _v in HVs.values():  # All vacant HVs force exit the market
                 _v.decide_exit(event.time, end=True)
-            HVs.clear()
 
         assert isinstance(event, TripCompletion), 'Overdue events should not be {}'.format(event)
         event.trigger(end=True)  # All occupied HVs force exit the market after drop-off

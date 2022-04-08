@@ -196,6 +196,15 @@ class AV(Vehicle):
                                                                   'activation': False}, ignore_index=True)
 
 
+class EV(HV):
+    def __init__(self, time, loc, neo, hourlyCost, targetIncome, initialSoC):
+        super().__init__(time, loc, neo, hourlyCost, targetIncome)
+        self.SoC = initialSoC * Electricity.max_SoC
+
+    def __repr__(self):
+        return 'EV{}'.format(self.id)
+
+
 class TripCompletion(Event):
     def __init__(self, time, vehicle, drop_off=False):
         super().__init__(time, priority=1)
@@ -233,6 +242,8 @@ class TripCompletion(Event):
             Statistics.utilisation_data = Statistics.utilisation_data.append({'time': self.time,
                                                                               'v_id': self.vehicle.id,
                                                                               'trip_utilisation': newRatio}, ignore_index=True)
+        else:  # Vehicle becomes available after recharging or repositioning
+            HVs[self.vehicle.id] = self.vehicle
 
 
 class ActivateAVs(Event):
@@ -272,15 +283,6 @@ class DeactivateAVs(Event):
                 # v.update_loc(self.time)
                 v.time = self.time
                 v.deactivate()
-
-
-class EV(HV):
-    def __init__(self, time, loc, neo, hourlyCost, targetIncome, initialSoC):
-        super().__init__(time, loc, neo, hourlyCost, targetIncome)
-        self.SoC = initialSoC * Electricity.max_SoC
-
-    def __repr__(self):
-        return 'EV{}'.format(self.id)
 
 
 class NewHV(Event):
