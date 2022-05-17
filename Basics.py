@@ -34,14 +34,6 @@ def validate_passengers(passenger_file):
         df['VoT'] = truncnorm.rvs(a=-3.125, b=1.875, loc=32, scale=3.2, size=df.shape[0])
         df['VoT'] = df['VoT'].round(2)  # Round to the nearest cents for readability
 
-        # Individual utility parameters are assumed to follow truncated normal distributions (professional knowledge)
-        df['AV_const'] = truncnorm.rvs(a=-1, b=1, loc=0, scale=0.5, size=df.shape[0])
-        df['HV_const'] = truncnorm.rvs(a=-1, b=1, loc=0, scale=0.5, size=df.shape[0])
-        df['AV_coef_fare'] = truncnorm.rvs(a=-1, b=1, loc=0.2, scale=0.2, size=df.shape[0])
-        df['HV_coef_fare'] = truncnorm.rvs(a=-1, b=1, loc=0.2, scale=0.2, size=df.shape[0])
-        df['AV_coef_time'] = truncnorm.rvs(a=-1, b=1, loc=0.05, scale=0.05, size=df.shape[0])
-        df['HV_coef_time'] = truncnorm.rvs(a=-1, b=1, loc=0.05, scale=0.05, size=df.shape[0])
-
         # Write back to passenger file with injected attributes
         df.sort_values('tpep_pickup_datetime').to_csv(configs["passenger_file"], index=False)
         print('Attribute injection is completed.')
@@ -55,9 +47,8 @@ def random_loc():
 
 
 def path_between(from_loc, to_loc):
-    assert (isinstance(from_loc, Location) and isinstance(to_loc, Location)), 'Path must be calculated between 2 locations.'
     if (from_loc.source is to_loc.source) and (from_loc.target is to_loc.target) and (from_loc.timeFromSource < to_loc.timeFromSource):
-        return None  # There is no path if both are on the same road, and vehicle is upstream to passenger
+        return None  # There is no path node if both are on the same road, travelling downstream
     return nx.shortest_path(G, from_loc.target, to_loc.source, weight='duration')
 
 
@@ -79,14 +70,18 @@ def duration_between(from_loc, to_loc):
     if (from_loc.source is to_loc.source) and (from_loc.target is to_loc.target) and (from_loc.timeFromSource < to_loc.timeFromSource):
         return to_loc.timeFromSource - from_loc.timeFromSource
     else:
+        cost = shortest_times.loc[from_loc.target, to_loc.source]  # Load pre-calculated travel times
         # cost = nx.shortest_path_length(G, from_loc.target, to_loc.source, weight='duration')
-        cost = shortest_times.loc[from_loc.target, to_loc.source]
 
     if from_loc.type != 'Intersection':
         cost += from_loc.timeFromTarget
     if to_loc.type != 'Intersection':
         cost += to_loc.timeFromSource
-    return cost
+
+    if cost == 0:
+        return 1  # The minimum travel time is set to 1 sec, avoiding possible computational errors
+    else:
+        return cost
 
 
 class Location:
@@ -107,11 +102,11 @@ class Location:
                 self.type = 'Road'
                 self.target = target
                 r_length = G.edges[source, target]['distance']
-                r_travelTime = G.edges[source, target]['duration']
+                r_travel_time = G.edges[source, target]['duration']
                 self.locFromSource = loc_from_source
-                self.timeFromSource = int(r_travelTime * self.locFromSource / r_length)
+                self.timeFromSource = int(r_travel_time * self.locFromSource / r_length)
                 self.locFromTarget = r_length - self.locFromSource
-                self.timeFromTarget = r_travelTime - self.timeFromSource
+                self.timeFromTarget = r_travel_time - self.timeFromSource
 
     def __repr__(self):
         if self.type == 'Intersection':
@@ -123,13 +118,12 @@ class Location:
 class Event:
     """ Event priorities, the triggering order at the same time
 
-        0 : NewHV, ActivateAVs/DeactivateAVs
+        0 : NewEV
         1 : TripCompletion
         2 : UpdatePhi
         3 : NewPassenger
         4 : UpdateStates
         5 : Assign
-        6 : MPC
     """
 
     def __init__(self, time, priority):

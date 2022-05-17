@@ -5,21 +5,12 @@
   "charging_station_file": "Network_map/charging_station.csv",
   "nearest_station_file": "Network_map/nearest_cs.csv",
   "passenger_file": "DailyTrips_June1.csv",
-  "data_output_path": "../Results/Simulation_Outputs",
-  "output_number": 10,
+  "data_output_path": "Results/Simulation_Outputs",
+  "output_number": 0,
 
   "maximum_work_duration": 43200,
   "default_waiting_time": 1200,
 
-  "HV_fleet_size": 500,
-  "AV_fleet_size": 3000,
-  "AV_initial_size": 150,
-  "match_interval": 10,
-
-  "MPC_start_hour": 4,
-  "MPC_end_hour": 16,
-  "MPC_steps": 6,
-  "MPC_control_steps": 2,
-  "MPC_control_interval": 300,
-  "MPC_prediction_interval": 10
+  "EV_fleet_size": 500,
+  "match_interval": 10
 }
