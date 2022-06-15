@@ -1,16 +1,15 @@
 {
   "map_file": "Network_map/edgeList.shp",
   "shortest_path_time_file": "Network_map/path_table.csv",
-  "depot_file": "Network_map/depot.csv",
   "charging_station_file": "Network_map/charging_station.csv",
   "nearest_station_file": "Network_map/nearest_cs.csv",
   "passenger_file": "DailyTrips_June1.csv",
-  "data_output_path": "Results/Simulation_Outputs",
+  "output_path": "Results",
   "output_number": 0,
 
   "maximum_work_duration": 43200,
   "default_waiting_time": 1200,
 
-  "EV_fleet_size": 500,
+  "fleet_size": 500,
   "match_interval": 10
 }

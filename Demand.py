@@ -1,146 +1,132 @@
-from itertools import count
-import numpy as np
 import pandas as pd
+import numpy as np
+from scipy.stats import truncnorm
 
-from Configuration import configs
-from Parser import read_passengers
-from Basics import Event, Location, duration_between
-from Control import Statistics, Parameters, Variables, compute_phi
+from Parser import passenger_file, default_waiting_time
+from Basics import Event, Location, duration_between, distance_between, compute_phi, p_id
+from Control import Statistics, Parameters, Variables
+
+passengers = {}
+
+
+# File is validated to include passenger attributes for future simulations.
+# Similar to using a random seed which maintains stochastic attributes over difference simulations.
+def validate_passengers(file=passenger_file):
+    if any(~pd.Series(['patience', 'trip_distance', 'trip_duration', 'U_const', 'U_fare', 'VoT']).isin(pd.read_csv(file, nrows=0))):
+        print('Injecting passenger attributes...')
+        df = pd.read_csv(file)
+
+        df['tpep_pickup_datetime'] = (pd.to_datetime(df['tpep_pickup_datetime']) - pd.Timestamp('1970-01-01')) // pd.Timedelta('1s')
+
+        # Random patience time (sec) ~ Normal(60, 6^2) bounded by [30, 90]
+        df['patience'] = truncnorm.rvs(a=-5, b=5, loc=60, scale=6, size=df.shape[0]).astype(int)
+
+        # Calculate trip properties for access in future simulations
+        df['trip_distance'] = df.apply(lambda x: distance_between(Location(x['o_source'], x['o_target'], x['o_loc']),
+                                                                  Location(x['d_source'], x['d_target'], x['d_loc'])), axis=1)
+        df['trip_duration'] = df.apply(lambda x: duration_between(Location(x['o_source'], x['o_target'], x['o_loc']),
+                                                                  Location(x['d_source'], x['d_target'], x['d_loc'])), axis=1)
+
+        # Passenger choice parameters for EV mode utility
+        df['U_const'] = truncnorm.rvs(a=-1, b=1, loc=0, scale=1, size=df.shape[0])
+        df['U_fare'] = truncnorm.rvs(a=-1, b=1, loc=3.2, scale=0.2, size=df.shape[0])
+
+        # Random VoT ($/hr) ~ Normal(32, 3.2^2) bounded by [22, 38], rounded to int. (NYC HDM, 2018 household income)
+        # VoT might be underestimated for Manhattan which is a relatively high-income area (Ulak, et al., 2020)
+        df['VoT'] = truncnorm.rvs(a=-3.125, b=1.875, loc=32, scale=3.2, size=df.shape[0])
+        df['VoT'] = df['VoT'].round(2)  # Round to the nearest cents for readability
+
+        # Write back to passenger file with injected attributes
+        df.sort_values('tpep_pickup_datetime').to_csv(file, index=False)
+        print('Passenger attributes are successfully injected.')
 
 
 def load_passengers(fraction=1, hours=18):
-    passenger_df = read_passengers(fraction, hours)
-    lastPaxTime = passenger_df['time'].max()
+    use_cols = ['tpep_pickup_datetime', 'patience',
+                'o_source', 'o_target', 'o_loc',
+                'd_source', 'd_target', 'd_loc',
+                'trip_distance', 'trip_duration',
+                'U_const', 'U_fare', 'VoT']
+    passenger_df = pd.read_csv(passenger_file, usecols=use_cols)
+    passenger_df['time'] = passenger_df['tpep_pickup_datetime'] - passenger_df['tpep_pickup_datetime'].min()
 
-    # Set demand prediction values
-    bins = [i for i in range(0, lastPaxTime, configs['MPC_prediction_interval'])]
-    Variables.histDemand = passenger_df['time'].groupby(pd.cut(passenger_df['time'], bins)).count().tolist()
+    # Demand time shift, move 00:00 - 04:00 to the end of the day such that simulation starts at 04:00
+    passenger_df['time'] = (passenger_df['time'] + 20 * 3600) % (24 * 3600)
 
-    # Update values of phi before creating new passengers
-    for t in passenger_df['time'].unique():
-        UpdatePhi(t)
+    # Limit daily demand to the specified hours
+    passenger_df = passenger_df[passenger_df['time'] <= hours * 3600]
+
+    # print(passenger_df.dtypes)  # Print data types for debugging
+
+    passenger_df = passenger_df.drop(columns=['tpep_pickup_datetime']).sample(frac=fraction).reset_index()
+
+    Statistics.lastPassengerTime = passenger_df['time'].max()
 
     # Create passenger events
     for p in passenger_df.itertuples():
-        NewPassenger(p.time, Location(p.o_source, p.o_target, p.o_loc), Location(p.d_source, p.d_target, p.d_loc),
-                     p.trip_distance, p.trip_duration, p.patience, p.VoT,
-                     p.AV_const, p.AV_coef_fare, p.AV_coef_time, p.HV_const, p.HV_coef_fare, p.HV_coef_time)
-
-    Statistics.simulationEndTime = lastPaxTime
-    Statistics.lastPassengerTime = lastPaxTime
+        NewPassenger(p.time, p.o_source, p.o_target, p.o_loc, p.d_source, p.d_target, p.d_loc,
+                     p.trip_distance, p.trip_duration, p.patience, p.U_const, p.U_fare, p.VoT)
 
 
 class Passenger:
-    _ids = count(0)
-    p_HV = {}
-    p_AV = {}
 
-    def __init__(self, time, origin, destination, trip_distance, trip_duration,
-                 patience, VoT, AV_const, AV_coef_fare, AV_coef_time,
-                 HV_const, HV_coef_fare, HV_coef_time, HVs=None, AVs=None):
-        self.id = next(self._ids)
+    def __init__(self, time, origin, destination, trip_distance, trip_duration, patience, U_const, U_fare, VoT, EVs):
+        self.id = next(p_id)
         self.requestTime = time
         self.origin = origin
         self.destination = destination
         self.tripDistance = trip_distance
         self.tripDuration = trip_duration
-
         self.expiredTime = time + patience
-        self.VoT = VoT / 3600 # Value of time ($/sec)
-        self.AV_const = AV_const
-        self.AV_coef_fare = AV_coef_fare
-        self.AV_coef_time = AV_coef_time
-        self.HV_const = HV_const
-        self.HV_coef_fare = HV_coef_fare
-        self.HV_coef_time = HV_coef_time
 
-        # There is no AVs in the EV paper
-        self.preferHV = True
-        Passenger.p_HV[self.id] = self
-        self.fare = Variables.HV_unitFare / 3600 * self.tripDuration
+        self.U_const = U_const
+        self.U_fare = U_fare / 60  # fare utility coefficient (1/sec)
+        self.VoT = VoT / 3600  # Value of time ($/sec)
+        self.fare = round(Parameters.baseFare + Parameters.unitFare * self.tripDuration / 3600, 2)
 
-        # self.preferHV, self.fare = Passenger.choose_vehicle(self, HVs, AVs)
-        if self.preferHV is not None:
-            if self.preferHV:
-                Passenger.p_HV[self.id] = self
-            elif ~self.preferHV:
-                Passenger.p_AV[self.id] = self
+        generalised_cost = self.U_const + self.U_fare * self.fare + self.VoT * self.min_wait_time(EVs) * Parameters.phi
+        self.preferEV = np.exp(-generalised_cost) / sum(np.exp([-generalised_cost, -Parameters.others_GC])) > Parameters.choices[self.id]
+
+        if self.preferEV:  # Passenger waits for available EVs
+            passengers[self.id] = self
 
         # Record statistics
-        Statistics.passenger_data = Statistics.passenger_data.append({'p_id': self.id,
-                                                                      'request_t': self.requestTime,
-                                                                      'trip_d': self.tripDistance,
-                                                                      'trip_t': self.tripDuration,
-                                                                      'VoT': self.VoT,
-                                                                      'fare': self.fare,
-                                                                      'prefer_HV': self.preferHV}, ignore_index=True)
+        Statistics.data_output['passenger_data'].append([self.id, self.requestTime, self.tripDistance,
+                                                         self.tripDuration, self.VoT, self.fare, self.preferEV])
 
     def __repr__(self):
-        return 'Passenger_{}'.format(self.id)
+        return 'Passenger{}'.format(self.id)
 
     def min_wait_time(self, vehicles):
         nearest_time = float('inf')
         for vehicle in vehicles:
             nearest_time = min(duration_between(vehicle.loc, self.origin), nearest_time)
-        return nearest_time
 
-    def choose_vehicle(self, HV_v, AV_v):
-        # Fare = Unit price * Trip duration
-        fare_HV = Variables.HV_unitFare / 3600 * self.tripDuration
-        fare_AV = Variables.AV_unitFare / 3600 * self.tripDuration
-
-        # Generalised cost = Fare + VoT * (Estimation ratio * Time to the nearest vacant vehicle)
-        GC_HV = self.HV_const + self.HV_coef_fare * fare_HV + self.HV_coef_time * \
-                self.VoT * Parameters.phiHV * min(self.min_wait_time(HV_v), configs['default_waiting_time'])
-        GC_AV = self.AV_const + self.AV_coef_fare * fare_AV + self.AV_coef_time * \
-                self.VoT * Parameters.phiAV * min(self.min_wait_time(AV_v), configs['default_waiting_time'])
-
-        # Logit choice based on GC (dis-utility) of vehicles
-        _c = np.random.choice(['HV', 'AV', 'others'],
-                              p=np.exp([-GC_HV, -GC_AV, -Parameters.others_GC]) / sum(np.exp([-GC_HV, -GC_AV, -Parameters.others_GC])))
-        if _c == 'HV':
-            return True, fare_HV  # Prefer HV
-        elif _c == 'AV':
-            return False, fare_AV  # Prefer AV
+        if nearest_time == float('inf'):
+            return default_waiting_time
         else:
-            return None, 0  # Prefer other modes
+            return nearest_time
 
     def check_expiration(self, t):
-        if t >= self.expiredTime and self.preferHV is not None:
-            if self.preferHV:
-                del Passenger.p_HV[self.id]
-            elif ~self.preferHV:
-                del Passenger.p_AV[self.id]
+        if t >= self.expiredTime:
+            del passengers[self.id]
+            Variables.EV_pw = len(passengers)
 
             # Record statistics
-            Statistics.expiration_data = Statistics.expiration_data.append({'p_id': self.id, 'expire_t': self.expiredTime}, ignore_index=True)
-
-
-class UpdatePhi(Event):
-    def __init__(self, time):
-        super().__init__(time, priority=2)
-
-    def __lt__(self, other):
-        return (self.time, self.priority) < (other.time, other.priority)
-
-    def __repr__(self):
-        return 'UpdatePhi@t{}'.format(self.time)
-
-    def trigger(self, nHV, nAV):
-        Parameters.phiHV = compute_phi(len(Passenger.p_HV), nHV)
-        Parameters.phiAV = compute_phi(len(Passenger.p_AV), nAV)
+            Statistics.data_output['expiration_data'].append([self.id, self.expiredTime])
 
 
 class NewPassenger(Event):
-    def __init__(self, time, *args):
+    def __init__(self, time, o_source, o_target, o_loc, d_source, d_target, d_loc, *args):
         super().__init__(time, priority=3)
+        self.origin = Location(o_source, o_target, o_loc)
+        self.destination = Location(d_source, d_target, d_loc)
         self.args = args
-
-    def __lt__(self, other):
-        return (self.time, self.priority) < (other.time, other.priority)
 
     def __repr__(self):
         return 'Passenger@t{}'.format(self.time)
 
-    def trigger(self, HVs, AVs):
-        Passenger(self.time, *self.args, HVs, AVs)
+    def trigger(self, EVs):
+        Parameters.phi = compute_phi(len(passengers), len(EVs))  # Update waiting time estimation coefficient
+        Passenger(self.time, self.origin, self.destination, *self.args, EVs)
+        Variables.EV_pw = len(passengers)

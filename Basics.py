@@ -1,42 +1,19 @@
 import heapq
-import pandas as pd
+from itertools import count
 import numpy as np
 import networkx as nx
-from scipy.stats import truncnorm
 
-from Configuration import configs
 from Map import G, shortest_times
 
-
 eventQueue = []
+v_id = count(0)
+p_id = count(0)
 
 
-# File is validated to include passenger attributes for future simulations.
-# Similar to using a random seed which maintains stochastic attributes over difference simulations.
-def validate_passengers(passenger_file):
-    cols = pd.read_csv(passenger_file, nrows=1).columns
-    if 'patience' not in cols:
-        print('Injecting passenger attributes...')
-        df = pd.read_csv(configs["passenger_file"])
-        df['tpep_pickup_datetime'] = (pd.to_datetime(df['tpep_pickup_datetime']) - pd.Timestamp('1970-01-01')) // pd.Timedelta('1s')
-
-        # Calculate trip properties for access in future simulations
-        df['trip_distance'] = df.apply(lambda x: distance_between(Location(x['o_source'], x['o_target'], x['o_loc']),
-                                                                  Location(x['d_source'], x['d_target'], x['d_loc'])), axis=1)
-        df['trip_duration'] = df.apply(lambda x: duration_between(Location(x['o_source'], x['o_target'], x['o_loc']),
-                                                                  Location(x['d_source'], x['d_target'], x['d_loc'])), axis=1)
-
-        # Random patience time (sec) ~ Normal(60, 6^2) bounded by [30, 90]
-        df['patience'] = truncnorm.rvs(a=-5, b=5, loc=60, scale=6, size=df.shape[0]).astype(int)
-
-        # Random VoT ($/hr) ~ Normal(32, 3.2^2) bounded by [22, 38], rounded to int. (NYC HDM, 2018 household income)
-        # VoT might be underestimated for Manhattan which is a relatively high-income area (Ulak, et al., 2020)
-        df['VoT'] = truncnorm.rvs(a=-3.125, b=1.875, loc=32, scale=3.2, size=df.shape[0])
-        df['VoT'] = df['VoT'].round(2)  # Round to the nearest cents for readability
-
-        # Write back to passenger file with injected attributes
-        df.sort_values('tpep_pickup_datetime').to_csv(configs["passenger_file"], index=False)
-        print('Attribute injection is completed.')
+def compute_phi(waiting_passengers, vacant_vehicles):
+    less = min(waiting_passengers, vacant_vehicles)
+    more = max(waiting_passengers, vacant_vehicles)
+    return max(1.0, np.exp(0.16979338 + 0.03466977 * less - 0.0140257 * more))
 
 
 def random_loc():
@@ -116,30 +93,17 @@ class Location:
 
 
 class Event:
-    """ Event priorities, the triggering order at the same time
-
-        0 : NewEV
-        1 : TripCompletion
-        2 : UpdatePhi
+    """ Event priorities, the triggering order at the same tim
+        1 : TripCompletion, PickUp, ChargerOn
+        2 : NewEV
         3 : NewPassenger
-        4 : UpdateStates
-        5 : Assign
+        4 : Assign
     """
 
     def __init__(self, time, priority):
-        self.time = int(time)
-        self.priority = int(priority)
+        self.time = time
+        self.priority = priority
         heapq.heappush(eventQueue, self)
 
     def __lt__(self, other):
         return (self.time, self.priority) < (other.time, other.priority)
-
-
-class Electricity:
-    max_SoC = 40  # unit: kWh
-    min_SoC = 8  # unit: kWh
-    charge_rate = 6  # unit: kW
-    consumption_rate = 6  # unit: kW
-    electricity_cost = 0.2  # unit: $/kWh
-    charging_benefit = 0.3  # unit: $/kWh
-    charging_cost = 1.5  # unit: $/h
