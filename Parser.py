@@ -13,8 +13,7 @@ def read_passengers(fraction, hours):
                 'o_source', 'o_target', 'o_loc',
                 'd_source', 'd_target', 'd_loc',
                 'trip_distance', 'trip_duration',
-                'AV_const', 'AV_coef_fare', 'AV_coef_time',
-                'HV_const', 'HV_coef_fare', 'HV_coef_time']
+                'AV_const', 'AV_coef_fare', 'HV_const', 'HV_coef_fare']
     passenger_df = pd.read_csv(configs["passenger_file"], usecols=use_cols)
     passenger_df['time'] = passenger_df['tpep_pickup_datetime'] - passenger_df['tpep_pickup_datetime'].min()
 

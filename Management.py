@@ -1,92 +1,41 @@
+import itertools
+
 import pandas as pd
-import pulp
+from gurobipy import *
 
 from Configuration import configs
-from Basics import Event, duration_between
+from Basics import Event, duration_between_vec
 from Control import Parameters, Variables, Statistics, MPC
 from Demand import Passenger
-from Supply import HVs, activeAVs, TripCompletion, ActivateAVs, DeactivateAVs
-
-
-def One2One_Matching(Utility):
-    # Define LP problem
-    model = pulp.LpProblem("Ride_Matching_Problems", pulp.LpMaximize)
-
-    # Initialise binary variables to represent pairing
-    X = pulp.LpVariable.dicts("X", ((_v, _p) for _v in Utility.index for _p in Utility.columns), lowBound=0, upBound=1, cat='Integer')
-
-    # Objective as the sum of potential costs
-    model += (pulp.lpSum([Utility.loc[_v, _p] * X[(_v, _p)] for _v in Utility.index for _p in Utility.columns]))
-
-    # Constraint 1: row sum to 1, one vacant vehicle only matches with one waiting passenger request
-    for _v in Utility.index:
-        model += pulp.lpSum([X[(_v, _p)] for _p in Utility.columns]) <= 1
-
-    for _p in Utility.columns:
-        model += pulp.lpSum([X[(_v, _p)] for _v in Utility.index]) <= 1
-
-    solver = pulp.GLPK_CMD(msg=False)  # Suppress output
-    model.solve(solver)  # Solve LP
-
-    result = {}
-    for var in X:
-        var_value = X[var].varValue
-        if var_value != 0:
-            # Write paired matches to result dict
-            result[var[0]] = var[1]
-
-    return result
-
-
-# Bipartite matching which minimises the total dispatch trip duration
-# def bipartite_match(vacant_v, waiting_p):
-#     if (not vacant_v) | (not waiting_p):
-#         return None  # No matching if either set is empty
-#
-#     bipartite_graph = nx.DiGraph()
-#     for p in waiting_p:
-#         for v in vacant_v:
-#             # _t = duration_between(v.loc, p.origin)
-#             bipartite_graph.add_node(v, bipartite=0)
-#             bipartite_graph.add_node(p, bipartite=1)
-#             bipartite_graph.add_edge(v, p, duration=duration_between(v.loc, p.origin))
-#
-#     results = None
-#     top_nodes = {n for n, d in bipartite_graph.nodes(data=True) if d['bipartite'] == 0}
-#     if not nx.is_empty(bipartite_graph):
-#         results = [(v, p, bipartite_graph.edges[v, p]['duration'])
-#                    for v, p in nx.bipartite.minimum_weight_full_matching(bipartite_graph, top_nodes=top_nodes, weight='duration').items()
-#                    if isinstance(p, Passenger)]
-#
-#     return results  # List of tuples with assigned (vehicle, passenger)
+from Supply import HVs, activeAVs, TripCompletion
 
 
 def bipartite_match(vacant_v, waiting_p):
     if (not vacant_v) or (not waiting_p):
         return None  # No matching if either set is empty
 
-    trip_tt = pd.DataFrame(index=vacant_v, columns=waiting_p)
-    for v in vacant_v:
-        for p in waiting_p:
-            trip_tt.loc[v, p] = duration_between(v.loc, p.origin)
+    trip_tt = pd.DataFrame((duration_between_vec([v.loc for v in vacant_v], [p.origin for p in waiting_p])).reshape(len(vacant_v), len(waiting_p)), index=vacant_v, columns=waiting_p)
+    Utility = trip_tt.rdiv(1, fill_value=0)
+    utility_dict = Utility.stack().to_dict()
 
-    results = [(v, p, trip_tt.loc[v, p]) for v, p in One2One_Matching(trip_tt.replace(0, 1).rdiv(1)).items()]
+    # Define LP problem
+    model = Model('bipartite_matching')
+    model.setParam('OutputFlag', 0)
+    X = model.addVars(list(itertools.product(Utility.index, Utility.columns)), vtype=GRB.BINARY, name='x')
+    model.setObjective(X.prod(utility_dict), GRB.MAXIMIZE)
+
+    # Objective as the sum of potential costs
+    model.addConstrs((X.sum('*', _p) <= 1 for _p in Utility.columns))
+    model.addConstrs((X.sum(_v, '*') <= 1 for _v in Utility.index))
+
+    results = []
+    model.optimize()
+
+    for key in X:
+        if X[key].x == 1:
+            results.append((key[0], key[1], trip_tt.loc[key]))
 
     return results  # List of tuples of assigned (vehicle, passenger, trip_tt)
-
-
-def compute_assignment(t):
-    for v in (HVs | activeAVs).values():
-        # v.update_loc(t)  # Update vehicle location
-        v.time = t  # Update vehicle time
-
-    for p in (Passenger.p_HV | Passenger.p_AV).values():
-        p.check_expiration(t)  # Remove expired passengers
-
-    # Compute and return minimum weighting full bipartite matching
-    HV_match = bipartite_match(HVs.values(), Passenger.p_HV.values())
-    AV_match = bipartite_match(activeAVs.values(), Passenger.p_AV.values())
-    return HV_match, AV_match
 
 
 class Assign(Event):
@@ -120,6 +69,7 @@ class Assign(Event):
 
                     # HVs receive incomes (wage = unit wage * trip duration)
                     v.income += Variables.HV_wage / 3600 * p.tripDuration
+                    Variables.totalWage += Variables.HV_wage / 3600 * p.tripDuration
 
                     # Add trip pick-up / drop-off feedback
                     if meeting_t in Statistics.HV_pickup_counter:
@@ -164,26 +114,31 @@ class Assign(Event):
                     UpdateOccupied(delivery_t, v.is_HV, -1)
 
                 # Record trip statistics
-                Statistics.assignment_data = Statistics.assignment_data.append({'v_id': v.id,
-                                                                                'p_id': p.id,
-                                                                                'is_HV': v.is_HV,
-                                                                                'dispatch_t': self.time,
-                                                                                'meeting_t': meeting_t,
-                                                                                'delivery_t': delivery_t},
-                                                                               ignore_index=True)
+                Statistics.assignment_data.append([v.id, p.id, v.is_HV, self.time, meeting_t, delivery_t])
 
     def trigger(self, end=False):
+        if self.time % 3600 == 0:
+            print('Hour = {:d}:00; AV fleet = {}; HV fleet = {}; AV trips = {}; HV trips = {}'.format(
+                4 + self.time // 3600, Variables.AV_total, Variables.HV_total, Variables.AV_trips, Variables.HV_trips))
+
         if not end:
-            HV_match, AV_match = compute_assignment(self.time)
+            for v in (HVs | activeAVs).values():
+                v.time = self.time  # Update vehicle time
+
+            for p in (Passenger.p_HV | Passenger.p_AV).values():
+                p.check_expiration(self.time)  # Remove expired passengers
+
+            # Compute and return minimum weighting full bipartite matching
+            HV_match = bipartite_match(HVs.values(), Passenger.p_HV.values())
+            AV_match = bipartite_match(activeAVs.values(), Passenger.p_AV.values())
+
             self.transport(HV_match)
             self.transport(AV_match)
 
-            # Exit decision-making at matching intervals for vacant HVs
-            for k in HVs.copy().keys():
-                HVs.pop(k).decide_exit(self.time)
-
-            Variables.histExits.append(Variables.exitDecisions)
-            Variables.exitDecisions = 0
+        Variables.AV_nv = len(activeAVs)
+        Variables.HV_nv = len(HVs)
+        Variables.HV_pw = len(Passenger.p_HV)
+        Variables.AV_pw = len(Passenger.p_AV)
 
 
 class UpdateStates(Event):
@@ -201,11 +156,30 @@ class UpdateStates(Event):
         Variables.HV_nv = len(HVs)
         Variables.HV_na = Variables.HV_total - Variables.HV_nv - Variables.HV_no
 
-        if Variables.AV_total > 0:
+        if (Variables.AV_total > 0) and (self.time > 3600):
             Parameters.AV_occupancy = Variables.AV_no / Variables.AV_total
 
-        if Variables.HV_total > 0:
+        if (Variables.HV_total > 0) and (self.time > 3600):
             Parameters.HV_occupancy = Variables.HV_no / Variables.HV_total
+
+
+class OverwriteControls(Event):
+    def __init__(self, time, AV_fare=None, HV_fare=None, AV_change=None):
+        super().__init__(time, priority=4)
+        self.AV_fare = AV_fare
+        self.HV_fare = HV_fare
+        self.AV_change = AV_change
+
+    def __repr__(self):
+        return 'OverwriteControls@t{}'.format(self.time)
+
+    def trigger(self):
+        if self.AV_fare:
+            Variables.AV_unitFare = self.AV_fare
+        if self.HV_fare:
+            Variables.HV_unitFare = self.HV_fare
+        if self.AV_change:
+            Variables.AV_change = self.AV_change
 
 
 def schedule_states(endTime):
@@ -230,6 +204,9 @@ def schedule_MPC(endTime):
         else:
             raise ValueError('MPC cannot be scheduled after simulation ends!')
 
+    # Clear MPC AV fleet control at the end of MPCs
+    OverwriteControls(configs['MPC_end_hour'] * 3600, AV_fare=36, HV_fare=36, AV_change=0)
+
 
 class UpdateOccupied(Event):
     def __init__(self, time, isHV, change):
@@ -245,11 +222,3 @@ class UpdateOccupied(Event):
             Variables.HV_no += self.change
         else:
             Variables.AV_no += self.change
-
-
-# Dynamic AV fleet management: activation/deactivation
-def manage_AVs(time, size):
-    if size > 0:
-        ActivateAVs(time, size)
-    elif size < 0:
-        DeactivateAVs(time, -size)

@@ -2,13 +2,18 @@ import heapq
 import pandas as pd
 import numpy as np
 import networkx as nx
-from scipy.stats import truncnorm
+from scipy.stats import truncnorm, gaussian_kde
 
 from Configuration import configs
 from Map import G, shortest_times
 
 
 eventQueue = []
+
+# Initialise synthetic participation times for kernel density estimation (KDE)
+historical_start_time = list((3600 * truncnorm.rvs(-0.5, 5, 3, 3, 400000)).astype(int)) + list((3600 * truncnorm.rvs(-2, 2, 10, 2, 300000)).astype(int)) + list((3600 * truncnorm.rvs(-2, 1, 15, 2, 150000)).astype(int))
+kde = gaussian_kde(historical_start_time)
+population_start_time = kde.resample(configs['HV_fleet_size'], seed=290496)[0].astype(int)
 
 
 # File is validated to include passenger attributes for future simulations.
@@ -18,7 +23,7 @@ def validate_passengers(passenger_file):
     if 'patience' not in cols:
         print('Injecting passenger attributes...')
         df = pd.read_csv(configs["passenger_file"])
-        df['tpep_pickup_datetime'] = (pd.to_datetime(df['tpep_pickup_datetime']) - pd.Timestamp('1970-01-01')) // pd.Timedelta('1s')
+        df['tpep_pickup_datetime'] = (pd.to_datetime(df['tpep_pickup_datetime']) - pd.Timestamp('1970-01-01')).total_seconds().astype(int)
 
         # Calculate trip properties for access in future simulations
         df['trip_distance'] = df.apply(lambda x: distance_between(Location(x['o_source'], x['o_target'], x['o_loc']),
@@ -30,17 +35,14 @@ def validate_passengers(passenger_file):
         df['patience'] = truncnorm.rvs(a=-5, b=5, loc=60, scale=6, size=df.shape[0]).astype(int)
 
         # Random VoT ($/hr) ~ Normal(32, 3.2^2) bounded by [22, 38], rounded to int. (NYC HDM, 2018 household income)
-        # VoT might be underestimated for Manhattan which is a relatively high-income area (Ulak, et al., 2020)
         df['VoT'] = truncnorm.rvs(a=-3.125, b=1.875, loc=32, scale=3.2, size=df.shape[0])
         df['VoT'] = df['VoT'].round(2)  # Round to the nearest cents for readability
 
         # Individual utility parameters are assumed to follow truncated normal distributions (professional knowledge)
-        df['AV_const'] = truncnorm.rvs(a=-1, b=1, loc=0, scale=0.5, size=df.shape[0])
-        df['HV_const'] = truncnorm.rvs(a=-1, b=1, loc=0, scale=0.5, size=df.shape[0])
-        df['AV_coef_fare'] = truncnorm.rvs(a=-1, b=1, loc=0.2, scale=0.2, size=df.shape[0])
-        df['HV_coef_fare'] = truncnorm.rvs(a=-1, b=1, loc=0.2, scale=0.2, size=df.shape[0])
-        df['AV_coef_time'] = truncnorm.rvs(a=-1, b=1, loc=0.05, scale=0.05, size=df.shape[0])
-        df['HV_coef_time'] = truncnorm.rvs(a=-1, b=1, loc=0.05, scale=0.05, size=df.shape[0])
+        df['AV_const'] = truncnorm.rvs(a=-1, b=1, loc=0, scale=1, size=df.shape[0])
+        df['HV_const'] = truncnorm.rvs(a=-1, b=1, loc=0, scale=1, size=df.shape[0])
+        df['AV_coef_fare'] = truncnorm.rvs(a=-1, b=1, loc=3.2, scale=0.2, size=df.shape[0])
+        df['HV_coef_fare'] = truncnorm.rvs(a=-1, b=1, loc=3.2, scale=0.2, size=df.shape[0])
 
         # Write back to passenger file with injected attributes
         df.sort_values('tpep_pickup_datetime').to_csv(configs["passenger_file"], index=False)
@@ -76,17 +78,23 @@ def distance_between(from_loc, to_loc):
 
 
 def duration_between(from_loc, to_loc):
-    if (from_loc.source is to_loc.source) and (from_loc.target is to_loc.target) and (from_loc.timeFromSource < to_loc.timeFromSource):
-        return to_loc.timeFromSource - from_loc.timeFromSource
-    else:
-        # cost = nx.shortest_path_length(G, from_loc.target, to_loc.source, weight='duration')
-        cost = shortest_times.loc[from_loc.target, to_loc.source]
+    # if (from_loc.source is to_loc.source) and (from_loc.target is to_loc.target) and (from_loc.timeFromSource < to_loc.timeFromSource):
+    #     return to_loc.timeFromSource - from_loc.timeFromSource
+    # else:
+    #     # cost = nx.shortest_path_length(G, from_loc.target, to_loc.source, weight='duration')
+    #     cost = shortest_times.loc[from_loc.target, to_loc.source]
+    #
+    # if from_loc.type != 'Intersection':
+    #     cost += from_loc.timeFromTarget
+    # if to_loc.type != 'Intersection':
+    #     cost += to_loc.timeFromSource
+    return shortest_times.loc[from_loc.target, to_loc.source] + from_loc.timeFromTarget + to_loc.timeFromSource
 
-    if from_loc.type != 'Intersection':
-        cost += from_loc.timeFromTarget
-    if to_loc.type != 'Intersection':
-        cost += to_loc.timeFromSource
-    return cost
+
+def duration_between_vec(from_loc_list, to_loc_list):
+    source_list, source_time = zip(*[(o.target, o.timeFromTarget) for o in from_loc_list])
+    target_list, target_time = zip(*[(d.source, d.timeFromSource) for d in to_loc_list])
+    return shortest_times.loc[source_list, target_list].to_numpy().ravel() + np.array(source_time).repeat(len(to_loc_list)) + np.tile(target_time, len(from_loc_list))
 
 
 class Location:
@@ -123,7 +131,7 @@ class Location:
 class Event:
     """ Event priorities, the triggering order at the same time
 
-        0 : NewHV, ActivateAVs/DeactivateAVs
+        0 : NewHV, ManageAVs
         1 : TripCompletion
         2 : UpdatePhi
         3 : NewPassenger
